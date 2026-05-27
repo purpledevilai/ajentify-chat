@@ -1,6 +1,7 @@
 'use client';
 
 import * as React from 'react';
+import * as DialogPrimitive from '@radix-ui/react-dialog';
 import { cn } from '../lib/utils';
 import { Sheet, SheetContent } from './primitives/Sheet';
 import { ChatView, type ChatViewClassNames, type ChatViewProps } from './ChatView';
@@ -199,6 +200,17 @@ export function ChatPanel({
         )}
         widthPx={isMobile ? undefined : width}
       >
+        {/*
+          Radix Dialog requires a Title + Description for screen readers.
+          The visible <ChatHeader /> already shows the agent name, so we
+          render the accessibility-only nodes here as sr-only siblings.
+        */}
+        <DialogPrimitive.Title className="sr-only">
+          {viewProps.title ? String(viewProps.title) : 'Assistant chat'}
+        </DialogPrimitive.Title>
+        <DialogPrimitive.Description className="sr-only">
+          Conversation panel
+        </DialogPrimitive.Description>
         {!isMobile && !disableResize ? (
           <div
             onPointerDown={onPointerDown}

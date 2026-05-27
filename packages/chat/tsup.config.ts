@@ -7,11 +7,18 @@ export default defineConfig({
     index: 'src/index.ts',
     ui: 'src/ui.ts',
   },
-  format: ['esm', 'cjs'],
+  // We ship ESM only. Code splitting requires ESM so the two entry points
+  // (`@ajentify/chat` and `@ajentify/chat/ui`) can share modules via chunks.
+  // Without splitting, each bundle gets its own copy of internal modules
+  // (e.g. `provider/context.ts`), which causes React Context to be created
+  // twice and the `useAjentify*` hooks to throw "must be used inside an
+  // <AjentifyProvider>" even when wrapped correctly. Modern targets (Next 15,
+  // Vite, Webpack 5) all support ESM, so this is safe.
+  format: ['esm'],
   dts: true,
   sourcemap: true,
   clean: true,
-  splitting: false,
+  splitting: true,
   treeshake: true,
   target: 'es2022',
   external: ['react', 'react-dom'],
