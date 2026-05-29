@@ -293,8 +293,15 @@ export function createCurrentContextStore(options: CurrentContextStoreOptions) {
             createdAt: Date.now(),
           }));
           set({ messages: [...get().messages, ...respMsgs] });
+          // The server replies to `client_side_tool_responses` only AFTER it
+          // has already emitted on_token / on_stop_token (and possibly the
+          // next round's on_client_side_tool_calls) for the continuation. By
+          // the time this await resolves, those notifications have already
+          // driven `status` to its correct value (`connected`, `streaming`,
+          // or `awaiting_tool_responses` for the next round). Re-setting it
+          // here would clobber that and leave the input permanently
+          // disabled when the agent does not produce any further text.
           await client.sendClientSideToolResponses(responses);
-          set({ status: 'streaming' });
         } catch (err) {
           const e =
             err instanceof AjentifyError

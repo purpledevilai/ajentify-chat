@@ -26,32 +26,28 @@ export function App() {
   return (
     <AjentifyProvider
       config={{
-        callbacks: {
-          createContext: async (req) =>
-            fetch('/api/ajentify/context', {
-              method: 'POST',
-              headers: { 'content-type': 'application/json' },
-              body: JSON.stringify(req ?? {}),
-            }).then((r) => r.json()),
-          generateAccessToken: async ({ contextId }) =>
-            fetch(`/api/ajentify/token`, {
-              method: 'POST',
-              headers: { 'content-type': 'application/json' },
-              body: JSON.stringify({ context_id: contextId }),
-            })
-              .then((r) => r.json())
-              .then((j) => j.token),
-          getContext: async (id) =>
-            fetch(`/api/ajentify/context/${id}`).then((r) => r.json()),
-          getContextHistory: async () =>
-            fetch(`/api/ajentify/context-history`).then((r) => r.json()),
-        },
-        // optional fallback for non-built-in client side tools:
-        clientSideTools: {
-          fallback: async (toolName, args) => {
-            return `unhandled tool: ${toolName}`;
-          },
-        },
+        createContext: async (req) =>
+          fetch('/api/ajentify/context', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify(req ?? {}),
+          }).then((r) => r.json()),
+        generateAccessToken: async () =>
+          // Your backend identifies the user from its own session and mints
+          // a token from their `client_id`. `contextId` is also passed in
+          // (not used here) — handy if you want to access-check it.
+          fetch(`/api/ajentify/token`, { method: 'POST' })
+            .then((r) => r.json())
+            .then((j) => j.token),
+        getContext: async (id) =>
+          fetch(`/api/ajentify/context/${id}`).then((r) => r.json()),
+        getContextHistory: async () =>
+          fetch(`/api/ajentify/context-history`).then((r) => r.json()),
+        // Optional catch-all for non-built-in client-side tools.
+        // (`get_page_data` / `do_page_action` are handled automatically by the
+        // `useGetPageData` / `useDoPageAction` hooks. The `navigate` tool can
+        // be handled here too — see "Navigation" below.)
+        clientSideTools: async (toolName, args) => `unhandled tool: ${toolName}`,
       }}
     >
       <YourApp />
@@ -111,6 +107,33 @@ useDoPageAction(async (key, args) => {
   throw new Error(`unknown action: ${key}`);
 }, [orderId]);
 ```
+
+### Navigation
+
+The built-in `navigate` tool lets the agent move the user between routes. Handle it from the provider's `clientSideTools` catch-all so it can use whatever router your app uses:
+
+```tsx
+// React Router v6 — call useNavigate() inside a component that lives
+// under <BrowserRouter />, then pass the function into clientSideTools.
+const navigate = useNavigate();
+
+<AjentifyProvider
+  config={{
+    // ...
+    clientSideTools: async (toolName, args) => {
+      if (toolName === 'navigate') {
+        const path = (args.path ?? args.route ?? args.url) as string | undefined;
+        if (!path) return { ok: false, error: 'navigate is missing a `path` argument' };
+        navigate(path);
+        return { ok: true, path };
+      }
+      return `unhandled client tool: ${toolName}`;
+    },
+  }}
+>
+```
+
+For Next.js App Router, swap `useNavigate()` for `useRouter()` from `next/navigation` and call `router.push(path)`.
 
 ## UI
 

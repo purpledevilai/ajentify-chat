@@ -18,16 +18,16 @@ export type StorageOption =
   | Storage
   | null;
 
-export interface AjentifyConfig {
+export interface AjentifyConfig extends ContextCallbacks {
   /** Override the token streaming WebSocket URL. */
   websocketUrl?: string;
-  /** Developer-supplied REST callbacks (proxied through their backend). */
-  callbacks: ContextCallbacks;
-  /** Client-side tool configuration. */
-  clientSideTools?: {
-    /** Catch-all handler for tools that aren't `get_page_data` / `do_page_action`. */
-    fallback?: FallbackToolHandler;
-  };
+  /**
+   * Catch-all handler for client-side tools the agent calls that aren't
+   * `get_page_data` / `do_page_action`. Receives the tool name, the agent's
+   * arguments, and the call's id; return a string (or anything stringifiable)
+   * for the agent.
+   */
+  clientSideTools?: FallbackToolHandler;
   /** Where to persist `{ contextId, accessToken, clientId }`. Defaults to `localStorage`. */
   storage?: StorageOption;
   /** Namespacing key for storage. Defaults to `'ajentify.chat'`. */
@@ -102,10 +102,10 @@ export function AjentifyProvider({ config, children }: AjentifyProviderProps): J
     return createStores({
       websocketUrl: config.websocketUrl,
       callbacks: {
-        createContext: (req) => configRef.current.callbacks.createContext(req),
-        generateAccessToken: (args) => configRef.current.callbacks.generateAccessToken(args),
-        getContext: (id) => configRef.current.callbacks.getContext(id),
-        getContextHistory: () => configRef.current.callbacks.getContextHistory(),
+        createContext: (req) => configRef.current.createContext(req),
+        generateAccessToken: (args) => configRef.current.generateAccessToken(args),
+        getContext: (id) => configRef.current.getContext(id),
+        getContextHistory: () => configRef.current.getContextHistory(),
       },
       storage: resolveStorage(config.storage),
       storageKey: config.storageKey,
@@ -121,9 +121,9 @@ export function AjentifyProvider({ config, children }: AjentifyProviderProps): J
   // Wire the fallback tool handler through to the client-side tools store.
   useEffect(() => {
     stores.clientSideTools.getState().setFallbackHandler(
-      config.clientSideTools?.fallback ?? null
+      config.clientSideTools ?? null
     );
-  }, [stores, config.clientSideTools?.fallback]);
+  }, [stores, config.clientSideTools]);
 
   // Tear down the WebSocket on unmount.
   useEffect(() => {

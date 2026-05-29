@@ -1,6 +1,7 @@
 'use client';
 
-import { createContext, useContext, useMemo, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from 'react';
+import { useRouter } from 'next/navigation';
 import { ThemeProvider } from 'next-themes';
 import { AjentifyProvider } from '@ajentify/chat';
 import { api } from './_lib/api';
@@ -21,26 +22,44 @@ export function useChatPanel(): ChatPanelControl {
 
 export function Providers({ children }: { children: ReactNode }) {
   const [open, setOpen] = useState(false);
+  const router = useRouter();
 
   const control = useMemo<ChatPanelControl>(
     () => ({ open, setOpen, toggle: () => setOpen((o) => !o) }),
     [open]
   );
 
+  // Catch-all for client-side tools. We route the built-in `navigate` tool
+  // through Next's app router so the agent can move the user between pages
+  // without a full reload.
+  const clientSideTools = useCallback(
+    async (toolName: string, args: Record<string, unknown>) => {
+      if (toolName === 'navigate') {
+        const path =
+          (args.path as string | undefined) ??
+          (args.route as string | undefined) ??
+          (args.url as string | undefined);
+        if (!path) {
+          return { ok: false, error: 'navigate is missing a `path` argument' };
+        }
+        router.push(path);
+        return { ok: true, path };
+      }
+      return `unhandled client tool: ${toolName}`;
+    },
+    [router]
+  );
+
   return (
     <ThemeProvider attribute="class" defaultTheme="light">
       <AjentifyProvider
         config={{
-          callbacks: {
-            createContext: api.createContext,
-            getContext: api.getContext,
-            generateAccessToken: ({ contextId }) => api.generateAccessToken(contextId),
-            getContextHistory: () =>
-              api.getContextHistory().then((r) => r.contexts),
-          },
-          clientSideTools: {
-            fallback: async (toolName) => `unhandled client tool: ${toolName}`,
-          },
+          createContext: api.createContext,
+          getContext: api.getContext,
+          generateAccessToken: () => api.generateAccessToken(),
+          getContextHistory: () =>
+            api.getContextHistory().then((r) => r.contexts),
+          clientSideTools,
           onError: (err) => {
             console.error('[ajentify]', err);
           },

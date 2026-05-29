@@ -46,12 +46,13 @@ export const api = {
     });
     return jsonOrThrow<FilteredContext>(res);
   },
-  async generateAccessToken(contextId: string): Promise<string> {
+  async generateAccessToken(): Promise<string> {
+    // The dev backend mints the token from the demo user's client_id (stored
+    // in the session cookie), so there's nothing to send in the body — the
+    // Ajentify /generate-api-key endpoint itself only needs the client_id.
     const res = await fetch(`${base}/token`, {
       method: 'POST',
       credentials: 'include',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ context_id: contextId }),
     });
     const { token } = await jsonOrThrow<{ token: string }>(res);
     return token;

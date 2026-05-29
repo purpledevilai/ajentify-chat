@@ -16,7 +16,11 @@ export interface ChatInputClassNames {
 export interface ChatInputProps {
   placeholder?: string;
   classNames?: ChatInputClassNames;
-  /** Disable send while streaming. Defaults to true. */
+  /**
+   * Disable the send action (button + Enter) while the agent is streaming
+   * or running client-side tools. The textarea itself stays focusable so
+   * the user can keep composing their next message. Defaults to true.
+   */
   disableWhileStreaming?: boolean;
   /** Max textarea height in px. Defaults to 200. */
   maxHeightPx?: number;
@@ -26,6 +30,10 @@ export interface ChatInputProps {
 
 /**
  * Auto-growing chat input. Enter sends, Shift+Enter inserts a newline.
+ *
+ * The textarea is never marked `disabled` — disabling a focused element
+ * blurs it and forces the user to click back in after every agent turn.
+ * Instead we gate only the send action while the agent is busy.
  */
 export function ChatInput({
   placeholder = 'Ask follow up',
@@ -40,7 +48,7 @@ export function ChatInput({
 
   const streaming = status === 'streaming' || status === 'awaiting_tool_responses';
   const connecting = status === 'connecting';
-  const disabledState = (disableWhileStreaming && streaming) || connecting;
+  const sendBlocked = (disableWhileStreaming && streaming) || connecting;
 
   const resize = React.useCallback(() => {
     const el = textareaRef.current;
@@ -56,7 +64,7 @@ export function ChatInput({
 
   const submit = React.useCallback(async () => {
     const text = value.trim();
-    if (!text || disabledState) return;
+    if (!text || sendBlocked) return;
     setValue('');
     if (onSend) {
       onSend(text);
@@ -72,16 +80,19 @@ export function ChatInput({
     } catch {
       // Errors surface via the store + onError config.
     }
-  }, [value, send, disabledState, hasContext, onSend]);
+  }, [value, send, sendBlocked, hasContext, onSend]);
 
   const onKeyDown = React.useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
       if (e.key === 'Enter' && !e.shiftKey && !e.metaKey && !e.ctrlKey) {
+        // Swallow Enter while the agent is busy so the user can keep
+        // typing without accidentally firing a send that would no-op.
         e.preventDefault();
+        if (sendBlocked) return;
         void submit();
       }
     },
-    [submit]
+    [submit, sendBlocked]
   );
 
   return (
@@ -99,7 +110,7 @@ export function ChatInput({
         onChange={(e) => setValue(e.target.value)}
         onKeyDown={onKeyDown}
         placeholder={placeholder}
-        disabled={disabledState}
+        aria-busy={sendBlocked || undefined}
         className={cn(
           'min-h-[36px] flex-1 resize-none border-0 bg-transparent p-0 text-sm focus-visible:ring-0 focus-visible:ring-offset-0',
           classNames?.textarea
@@ -111,7 +122,7 @@ export function ChatInput({
         variant="default"
         type="button"
         onClick={() => void submit()}
-        disabled={disabledState || value.trim().length === 0}
+        disabled={sendBlocked || value.trim().length === 0}
         className={cn('rounded-full', classNames?.sendButton)}
       >
         <Send className="h-4 w-4" />

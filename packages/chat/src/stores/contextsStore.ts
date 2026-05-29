@@ -26,6 +26,12 @@ export interface ContextCallbacks {
    * Mint a fresh access token for connecting to a context. The dev's backend
    * calls `POST /generate-api-key` with `{ type: 'client', client_id }` and
    * returns the JWT string.
+   *
+   * `contextId` and `clientId` are passed in for the dev backend's
+   * convenience (e.g. access-control checks or audit logging) — the
+   * Ajentify `/generate-api-key` endpoint itself is only keyed off the
+   * authenticated user's `client_id`, so most implementations can simply
+   * ignore these args and read the user from their own session.
    */
   generateAccessToken: (args: {
     contextId: string;
