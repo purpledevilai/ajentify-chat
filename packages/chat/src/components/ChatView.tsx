@@ -49,6 +49,18 @@ export interface ChatViewProps {
    * a node, or `null` to hide).
    */
   waitingIndicator?: React.ReactNode | null;
+  /**
+   * Forwarded to `<ChatMessages />`. Centered hero rendered while the chat
+   * is in the `'draft'` state. Pass a string to swap the headline (great
+   * place to inject the user's name) or a `ReactNode` to fully control the
+   * layout. Defaults to `'Hello! How can I help?'`. Pass `null` to hide.
+   */
+  newChatView?: React.ReactNode | null;
+  /**
+   * Forwarded to `<ChatInput />`. Placeholder shown in the textarea.
+   * Defaults to `'Ask anything…'`.
+   */
+  inputPlaceholder?: string;
 }
 
 /**
@@ -63,6 +75,8 @@ export function ChatView({
   autoCreateContext = false,
   emptyState,
   waitingIndicator,
+  newChatView,
+  inputPlaceholder,
 }: ChatViewProps): JSX.Element {
   const { hasContext, status } = useChat();
   const { createNew } = useContextHistory();
@@ -139,13 +153,17 @@ export function ChatView({
           <ChatMessages
             classNames={classNames?.messages}
             waitingIndicator={waitingIndicator}
+            newChatView={newChatView}
           />
         )}
       </div>
 
       {!showingHistory && hasContext ? (
         <div className="border-t border-border bg-background px-3 py-3">
-          <ChatInput classNames={classNames?.input} />
+          <ChatInput
+            classNames={classNames?.input}
+            placeholder={inputPlaceholder}
+          />
         </div>
       ) : null}
     </div>

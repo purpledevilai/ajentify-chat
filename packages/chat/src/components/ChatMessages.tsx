@@ -1,6 +1,7 @@
 'use client';
 
 import * as React from 'react';
+import { Loader2, Sparkles } from 'lucide-react';
 import { useChat } from '../hooks/useChat';
 import { uid } from '../lib/utils';
 import { cn } from '../lib/utils';
@@ -12,6 +13,12 @@ export interface ChatMessagesClassNames {
   empty?: string;
   /** The AI-styled placeholder bubble shown while waiting for the first token. */
   waitingBubble?: string;
+  /** Wrapper around the new-chat (draft) greeting view. */
+  newChat?: string;
+  /** The default greeting headline rendered when `newChatView` is a string. */
+  newChatTitle?: string;
+  /** The icon container above the default greeting headline. */
+  newChatIcon?: string;
   message?: MessageClassNames;
 }
 
@@ -32,7 +39,21 @@ export interface ChatMessagesProps {
    * - Pass `null` to suppress the indicator entirely.
    */
   waitingIndicator?: React.ReactNode | null;
+  /**
+   * Centered hero rendered in place of the message list while the chat is
+   * in the `'draft'` state (a fresh new chat that hasn't been sent yet).
+   * Lets devs greet the user by name or surface their own branding.
+   *
+   * - Pass a string (e.g. `` `Hey there, ${user.firstName}` ``) to use the
+   *   default centered styling with a sparkle icon above.
+   * - Pass any other `ReactNode` for full control over the layout.
+   * - Defaults to `'Hello! How can I help?'`.
+   * - Pass `null` to render nothing in the draft state.
+   */
+  newChatView?: React.ReactNode | null;
 }
+
+const DEFAULT_NEW_CHAT_TITLE = 'Hello! How can I help?';
 
 /**
  * Scrollable message list. Auto-scrolls to bottom when new messages or
@@ -45,6 +66,7 @@ export function ChatMessages({
   emptyState,
   noAnimation,
   waitingIndicator,
+  newChatView,
 }: ChatMessagesProps): JSX.Element {
   const { messages, pendingResponse, status, isWaitingForResponse } = useChat();
   const containerRef = React.useRef<HTMLDivElement | null>(null);
@@ -68,6 +90,12 @@ export function ChatMessages({
 
   const showWaiting = isWaitingForResponse && waitingIndicator !== null;
 
+  // Show the centered "new chat" hero while the user is in a fresh draft
+  // (no messages, no `create_context` round trip yet). Once they hit send,
+  // status flips to 'streaming' and this falls back to the regular list.
+  const showNewChatView =
+    status === 'draft' && messages.length === 0 && !showWaiting && newChatView !== null;
+
   React.useEffect(() => {
     if (!stickToBottomRef.current) return;
     const el = containerRef.current;
@@ -82,7 +110,7 @@ export function ChatMessages({
     stickToBottomRef.current = distanceFromBottom < 40;
   }, []);
 
-  const isEmpty = renderItems.length === 0 && !showWaiting;
+  const isEmpty = renderItems.length === 0 && !showWaiting && !showNewChatView;
 
   return (
     <div
@@ -96,12 +124,21 @@ export function ChatMessages({
     >
       <div
         className={cn(
-          'mx-auto flex flex-col gap-3 px-4 py-4',
+          'mx-auto flex min-h-full flex-col gap-3 px-4 py-4',
           'max-w-[760px]',
           classNames?.inner
         )}
       >
-        {isEmpty ? (
+        {showNewChatView ? (
+          <NewChatHero
+            content={newChatView}
+            classNames={{
+              root: classNames?.newChat,
+              title: classNames?.newChatTitle,
+              icon: classNames?.newChatIcon,
+            }}
+          />
+        ) : isEmpty ? (
           <div
             className={cn(
               'flex flex-1 items-center justify-center text-center text-sm text-muted-foreground py-12',
@@ -109,11 +146,18 @@ export function ChatMessages({
             )}
           >
             {emptyState ?? (
-              <span>
-                {status === 'idle'
-                  ? 'No active chat.'
-                  : 'Start the conversation below.'}
-              </span>
+              status === 'connecting' ? (
+                <span className="inline-flex items-center gap-2">
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  Loading conversation…
+                </span>
+              ) : (
+                <span>
+                  {status === 'idle'
+                    ? 'No active chat.'
+                    : 'Start the conversation below.'}
+                </span>
+              )
             )}
           </div>
         ) : (
@@ -133,6 +177,60 @@ export function ChatMessages({
           </WaitingBubble>
         ) : null}
       </div>
+    </div>
+  );
+}
+
+function NewChatHero({
+  content,
+  classNames,
+}: {
+  content: React.ReactNode;
+  classNames: { root?: string; title?: string; icon?: string };
+}): JSX.Element {
+  // When the dev passes a plain string we wrap it in our default centered
+  // layout so they can swap the headline (e.g. `` `Hey there, ${name}` ``)
+  // without rebuilding the hero from scratch. Anything richer renders as-is.
+  const isString = typeof content === 'string';
+  const headline = isString ? (content as string) : null;
+  const useDefaultLayout = isString || content === undefined;
+
+  if (!useDefaultLayout) {
+    return (
+      <div
+        className={cn(
+          'flex flex-1 flex-col items-center justify-center px-4 py-12 text-center',
+          classNames.root
+        )}
+      >
+        {content}
+      </div>
+    );
+  }
+
+  return (
+    <div
+      className={cn(
+        'flex flex-1 flex-col items-center justify-center gap-4 px-4 py-12 text-center',
+        classNames.root
+      )}
+    >
+      <div
+        className={cn(
+          'flex h-12 w-12 items-center justify-center rounded-full bg-secondary text-primary',
+          classNames.icon
+        )}
+      >
+        <Sparkles className="h-6 w-6" />
+      </div>
+      <h2
+        className={cn(
+          'text-xl font-semibold tracking-tight text-foreground',
+          classNames.title
+        )}
+      >
+        {headline ?? DEFAULT_NEW_CHAT_TITLE}
+      </h2>
     </div>
   );
 }

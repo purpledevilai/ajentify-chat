@@ -73,8 +73,30 @@ export function useContextHistory(): UseContextHistoryResult {
 
   const switchTo = useCallback(
     async (contextId: string) => {
+      // Tear down the prior chat synchronously so the user doesn't see a
+      // flash of the previous context's messages while we wait for
+      // `loadContext` + the new WebSocket handshake. We set
+      // `status: 'connecting'` and keep `contextId` truthy so
+      // `<ChatMessages />` keeps rendering (showing its connecting state)
+      // instead of falling back to the "no active chat" empty UI.
+      stores.currentContext.getState().disconnect();
+      stores.currentContext.setState({
+        contextId,
+        agent: null,
+        agentSpeaksFirst: false,
+        messages: [],
+        pendingResponse: null,
+        status: 'connecting',
+        error: null,
+        creating: false,
+        isDraft: false,
+        draftRequest: null,
+      });
+
       const ctx = await stores.contexts.getState().loadContext(contextId);
-      stores.contexts.getState().setCurrentContext(contextId, null, ctx.client_id ?? null);
+      stores.contexts
+        .getState()
+        .setCurrentContext(contextId, null, ctx.client_id ?? null);
       const hydrated = ctx.messages ?? [];
       await stores.currentContext.getState().connect(contextId, undefined);
       stores.currentContext.getState().hydrateMessages(hydrated);

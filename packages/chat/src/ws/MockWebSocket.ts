@@ -50,7 +50,11 @@ export class MockWebSocket {
     server.close = (code = 1000, reason = '', wasClean = true) => {
       if (this.readyState === MockWebSocket.CLOSED) return;
       this.readyState = MockWebSocket.CLOSED;
-      this.onclose?.({ code, reason, wasClean });
+      // Browsers schedule `onclose` asynchronously, so simulate that here.
+      // Tests that need to assert on the close event should `await` a flush.
+      queueMicrotask(() => {
+        this.onclose?.({ code, reason, wasClean });
+      });
     };
     queueMicrotask(() => {
       this.readyState = MockWebSocket.OPEN;
@@ -65,7 +69,12 @@ export class MockWebSocket {
   close(code = 1000, reason = ''): void {
     if (this.readyState === MockWebSocket.CLOSED) return;
     this.readyState = MockWebSocket.CLOSED;
-    this.onclose?.({ code, reason, wasClean: true });
+    // Browsers schedule `onclose` asynchronously after `ws.close()` returns,
+    // so simulate that here. Without this the ordering bug where a stale
+    // `wsClient`'s onclose clobbers freshly-set state can't be reproduced.
+    queueMicrotask(() => {
+      this.onclose?.({ code, reason, wasClean: true });
+    });
   }
 }
 

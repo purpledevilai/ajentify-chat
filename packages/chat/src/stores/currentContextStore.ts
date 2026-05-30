@@ -296,7 +296,16 @@ export function createCurrentContextStore(options: CurrentContextStoreOptions) {
 
       wsClient = client;
 
+      // Every listener bails out if the client it was registered on is no
+      // longer the active wsClient. WebSocket `onclose` (and any pending
+      // RPC rejection) fires asynchronously *after* `disconnect()` returns,
+      // so without this guard a stale client tears down state we've
+      // already replaced — e.g. clobbering the brand new `'draft'` status
+      // with the old client's delayed `'disconnected'`.
+      const isStale = () => wsClient !== client;
+
       client.on('status', (s) => {
+        if (isStale()) return;
         if (s === 'connected') {
           // If the last thing on screen is a human message we're between
           // "user sent" and "agent replied" — keep `status: 'streaming'`
@@ -324,15 +333,18 @@ export function createCurrentContextStore(options: CurrentContextStoreOptions) {
       });
 
       client.on('error', (err) => {
+        if (isStale()) return;
         set({ error: err.message, status: 'error' });
         emitError(err);
       });
 
       client.on('agent_connected', ({ agent, agent_speaks_first }) => {
+        if (isStale()) return;
         set({ agent, agentSpeaksFirst: Boolean(agent_speaks_first) });
       });
 
       client.on('on_token', ({ token, response_id }) => {
+        if (isStale()) return;
         const current = get().pendingResponse;
         if (!current || current.responseId !== response_id) {
           set({
@@ -351,6 +363,7 @@ export function createCurrentContextStore(options: CurrentContextStoreOptions) {
       });
 
       client.on('on_stop_token', ({ response_id }) => {
+        if (isStale()) return;
         const pending = get().pendingResponse;
         if (pending && pending.responseId === response_id && pending.text) {
           const aiMessage: TextMessage = {
@@ -372,6 +385,7 @@ export function createCurrentContextStore(options: CurrentContextStoreOptions) {
       });
 
       client.on('on_tool_call', (params) => {
+        if (isStale()) return;
         if (seenToolCallIds.has(params.tool_call_id)) return;
         seenToolCallIds.add(params.tool_call_id);
         set({
@@ -391,6 +405,7 @@ export function createCurrentContextStore(options: CurrentContextStoreOptions) {
       });
 
       client.on('on_tool_response', (params) => {
+        if (isStale()) return;
         set({
           messages: [
             ...get().messages,
@@ -407,6 +422,7 @@ export function createCurrentContextStore(options: CurrentContextStoreOptions) {
       });
 
       client.on('on_client_side_tool_calls', async ({ tool_calls }) => {
+        if (isStale()) return;
         // Surface the tool calls as messages so dev UIs can show them.
         const callMsgs = tool_calls
           .filter((tc) => !seenToolCallIds.has(tc.tool_call_id))
@@ -459,6 +475,7 @@ export function createCurrentContextStore(options: CurrentContextStoreOptions) {
       });
 
       client.on('on_events', ({ events, response_id }) => {
+        if (isStale()) return;
         options.onEvents?.(events, response_id);
       });
 

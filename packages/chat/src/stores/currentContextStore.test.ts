@@ -175,6 +175,35 @@ describe('currentContextStore', () => {
 
       current.getState().disconnect();
     });
+
+    it('keeps draft state when transitioning from a previously connected chat', async () => {
+      // Regression: tearing down the prior wsClient schedules an async
+      // onclose that previously fired *after* startNewContext set
+      // status='draft', clobbering it back to 'disconnected'. Now stale
+      // listeners must be ignored.
+      const { current, server } = setupStores();
+      autoRespond(server);
+
+      // Prime: send a real message so we end up with a connected wsClient
+      // and at least one human message in state.
+      await current.getState().startNewContext();
+      await current.getState().sendMessage('hello');
+
+      // Reset to a fresh draft (the user clicks "+").
+      await current.getState().startNewContext();
+      expect(current.getState().status).toBe('draft');
+      expect(current.getState().isDraft).toBe(true);
+
+      // Flush the queued microtasks the prior MockWebSocket scheduled
+      // for `onclose`. With the stale-listener guard, the draft state
+      // survives.
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(current.getState().status).toBe('draft');
+      expect(current.getState().isDraft).toBe(true);
+      expect(current.getState().messages).toHaveLength(0);
+    });
   });
 
   describe('sendMessage on a draft', () => {

@@ -14,6 +14,12 @@ export interface ChatInputClassNames {
 }
 
 export interface ChatInputProps {
+  /**
+   * Placeholder shown in the textarea. Defaults to `'Ask anything…'`.
+   * Devs typically thread this through `<ChatView />` /
+   * `<ChatPanel />` so the same string is used regardless of how they
+   * compose the chat.
+   */
   placeholder?: string;
   classNames?: ChatInputClassNames;
   /**
@@ -36,7 +42,7 @@ export interface ChatInputProps {
  * Instead we gate only the send action while the agent is busy.
  */
 export function ChatInput({
-  placeholder = 'Ask follow up',
+  placeholder = 'Ask anything…',
   classNames,
   disableWhileStreaming = true,
   maxHeightPx = 200,
