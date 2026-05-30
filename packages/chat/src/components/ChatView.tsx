@@ -33,6 +33,12 @@ export interface ChatViewProps {
   autoCreateContext?: boolean;
   /** Custom empty state when there is no context. */
   emptyState?: React.ReactNode;
+  /**
+   * Forwarded to `<ChatMessages />`. Customizes the placeholder shown while
+   * waiting for the agent's first token (e.g. `'Thinking…'`, `'Working…'`,
+   * a node, or `null` to hide).
+   */
+  waitingIndicator?: React.ReactNode | null;
 }
 
 /**
@@ -46,6 +52,7 @@ export function ChatView({
   title,
   autoCreateContext = false,
   emptyState,
+  waitingIndicator,
 }: ChatViewProps): JSX.Element {
   const { hasContext, status } = useChat();
   const { createNew } = useContextHistory();
@@ -119,7 +126,10 @@ export function ChatView({
             )}
           </div>
         ) : (
-          <ChatMessages classNames={classNames?.messages} />
+          <ChatMessages
+            classNames={classNames?.messages}
+            waitingIndicator={waitingIndicator}
+          />
         )}
       </div>
 

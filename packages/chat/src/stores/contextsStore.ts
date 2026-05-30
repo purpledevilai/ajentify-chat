@@ -24,19 +24,10 @@ export interface ContextCallbacks {
 
   /**
    * Mint a fresh access token for connecting to a context. The dev's backend
-   * calls `POST /generate-api-key` with `{ type: 'client', client_id }` and
-   * returns the JWT string.
-   *
-   * `contextId` and `clientId` are passed in for the dev backend's
-   * convenience (e.g. access-control checks or audit logging) — the
-   * Ajentify `/generate-api-key` endpoint itself is only keyed off the
-   * authenticated user's `client_id`, so most implementations can simply
-   * ignore these args and read the user from their own session.
+   * calls `POST /generate-api-key` and returns the JWT string. It is the
+   * callback's responsibility to identify the user (e.g. via session cookie).
    */
-  generateAccessToken: (args: {
-    contextId: string;
-    clientId?: string | null;
-  }) => Promise<string>;
+  generateAccessToken: () => Promise<string>;
 
   /** Fetch full context messages. Dev's backend calls `GET /context/{id}`. */
   getContext: (contextId: string) => Promise<FilteredContext>;
@@ -96,8 +87,8 @@ export interface ContextsStore {
     req?: CreateContextRequest
   ) => Promise<CreateContextResponse>;
 
-  /** Mint a fresh access token for the given context (defaults to current). */
-  generateAccessToken: (contextId?: string) => Promise<string>;
+  /** Mint a fresh access token for the current context. */
+  generateAccessToken: () => Promise<string>;
 
   /** Load the messages for a context by id. */
   loadContext: (contextId: string) => Promise<FilteredContext>;
@@ -206,19 +197,9 @@ export function createContextsStore(options: ContextsStoreOptions) {
       }
     },
 
-    generateAccessToken: async (contextId) => {
-      const targetId = contextId ?? get().contextId;
-      if (!targetId) {
-        throw new AjentifyError(
-          'generateAccessToken called without a contextId',
-          'config'
-        );
-      }
+    generateAccessToken: async () => {
       try {
-        const token = await options.callbacks.generateAccessToken({
-          contextId: targetId,
-          clientId: get().clientId,
-        });
+        const token = await options.callbacks.generateAccessToken();
         if (typeof token !== 'string' || token.length === 0) {
           throw new AjentifyError(
             'generateAccessToken callback returned an empty token',

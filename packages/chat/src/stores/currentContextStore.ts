@@ -154,10 +154,7 @@ export function createCurrentContextStore(options: CurrentContextStoreOptions) {
       const client = new TokenStreamingClient({
         url: wsUrl,
         contextId,
-        getAccessToken: async () => {
-          // Always re-mint right before (re)connect, per chosen strategy.
-          return await contextsStore.getState().generateAccessToken(contextId);
-        },
+        getAccessToken: contextsStore.getState().generateAccessToken,
         WebSocketImpl: options.WebSocketImpl,
         reconnect: options.reconnect,
         requestTimeoutMs: options.requestTimeoutMs,

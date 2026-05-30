@@ -13,7 +13,7 @@ export {
 export {
   createClientSideToolsStore,
   type ClientSideToolsStore,
-  type FallbackToolHandler,
+  type ClientSideToolHandler,
   type PageDataGetter,
   type PageActionHandler,
 } from './clientSideToolsStore';

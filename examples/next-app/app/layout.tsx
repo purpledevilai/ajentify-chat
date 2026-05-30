@@ -18,8 +18,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <Providers>
           <div className="app">
             <TopBar />
-            {children}
-            <ChatLayer />
+            <ChatLayer>{children}</ChatLayer>
           </div>
         </Providers>
       </body>

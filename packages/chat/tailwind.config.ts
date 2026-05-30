@@ -66,12 +66,17 @@ const config: Config = {
           '0%, 100%': { opacity: '1' },
           '50%': { opacity: '0' },
         },
+        'aj-dot-bounce': {
+          '0%, 80%, 100%': { transform: 'translateY(0)', opacity: '0.4' },
+          '40%': { transform: 'translateY(-3px)', opacity: '1' },
+        },
       },
       animation: {
         'aj-slide-in-right': 'aj-slide-in-right 220ms ease-out',
         'aj-slide-out-right': 'aj-slide-out-right 200ms ease-in',
         'aj-fade-in': 'aj-fade-in 200ms ease-out',
         'aj-blink': 'aj-blink 1s steps(1) infinite',
+        'aj-dot-bounce': 'aj-dot-bounce 1.2s ease-in-out infinite',
       },
     },
   },

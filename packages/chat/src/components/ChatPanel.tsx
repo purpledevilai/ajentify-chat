@@ -10,10 +10,16 @@ const WIDTH_STORAGE_KEY = 'ajentify.chat.panel.width';
 
 export interface ChatPanelClassNames {
   view?: ChatViewClassNames;
+  /** The chat container (the inline dock on desktop, the sheet on modal/mobile). */
   panel?: string;
+  /** The resize handle (desktop only). */
   handle?: string;
   /** Mobile (< md) sheet content. */
   mobileSheet?: string;
+  /** The outer wrapper (inline mode only). Defaults to a horizontal flex row that fills its parent. */
+  root?: string;
+  /** The slot containing `children` (inline mode only). Defaults to a scrollable flex column. */
+  body?: string;
 }
 
 export interface ChatPanelProps extends Omit<ChatViewProps, 'classNames' | 'onClose'> {
@@ -35,11 +41,22 @@ export interface ChatPanelProps extends Omit<ChatViewProps, 'classNames' | 'onCl
   mobileBreakpointPx?: number;
   /**
    * Render style on desktop:
-   *  - `modal` (default): a slide-in Sheet with overlay; blocks page clicks behind it
-   *  - `inline`: a fixed-right docked panel without overlay so users can keep interacting with the page
+   *  - `modal` (default): the chat opens as an overlaying Sheet with a
+   *    backdrop; blocks page clicks behind it. `children` render normally
+   *    underneath.
+   *  - `inline`: the chat docks in-flow on the right and `children` (your
+   *    routes / page content) render in the remaining space. Resizing the
+   *    panel shrinks/expands the children area in real time.
    */
   desktopVariant?: 'modal' | 'inline';
   classNames?: ChatPanelClassNames;
+  /**
+   * Page content the panel docks alongside. In `modal` (and on mobile) the
+   * children render in their natural place and the chat opens as an overlay;
+   * in desktop `inline` mode they share a horizontal flex layout with the
+   * docked chat.
+   */
+  children?: React.ReactNode;
 }
 
 function useMediaQuery(query: string): boolean {
@@ -61,9 +78,16 @@ function useMediaQuery(query: string): boolean {
 }
 
 /**
- * Opinionated wrapper around `<ChatView />` that slides in from the right
- * edge on desktop (with a draggable resize handle) and full-screens from
- * the right on mobile.
+ * Opinionated wrapper around `<ChatView />` designed to *wrap* your page or
+ * route content. On desktop it can either dock inline (`desktopVariant="inline"`,
+ * sharing horizontal space with `children`) or open as a modal Sheet over the
+ * top of `children`. On mobile it always falls back to a full-screen Sheet.
+ *
+ * ```tsx
+ * <ChatPanel open={open} onOpenChange={setOpen} desktopVariant="inline">
+ *   <Routes>...</Routes>
+ * </ChatPanel>
+ * ```
  */
 export function ChatPanel({
   open: controlledOpen,
@@ -76,8 +100,9 @@ export function ChatPanel({
   mobileBreakpointPx = 768,
   desktopVariant = 'modal',
   classNames,
+  children,
   ...viewProps
-}: ChatPanelProps): JSX.Element | null {
+}: ChatPanelProps): JSX.Element {
   const isControlled = controlledOpen !== undefined;
   const [uncontrolledOpen, setUncontrolledOpen] = React.useState(defaultOpen);
   const open = isControlled ? !!controlledOpen : uncontrolledOpen;
@@ -155,41 +180,9 @@ export function ChatPanel({
     [persistWidth, width]
   );
 
-  // Inline (non-modal) docked panel on desktop: render a fixed-right div
-  // without an overlay so users can keep clicking the underlying page. This
-  // is the recommended mode for "always-attached" experiences.
-  if (!isMobile && desktopVariant === 'inline') {
-    if (!open) return null;
-    return (
-      <div
-        className={cn(
-          'aj-root fixed inset-y-0 right-0 z-40 flex flex-col border-l border-border bg-background shadow-xl animate-aj-slide-in-right',
-          classNames?.panel
-        )}
-        style={{ width }}
-      >
-        {!disableResize ? (
-          <div
-            onPointerDown={onPointerDown}
-            onPointerMove={onPointerMove}
-            onPointerUp={onPointerUp}
-            className={cn(
-              'absolute left-0 top-0 z-10 h-full w-1.5 cursor-ew-resize select-none bg-transparent hover:bg-border/60 transition-colors',
-              classNames?.handle
-            )}
-          />
-        ) : null}
-        <ChatView
-          {...viewProps}
-          onClose={() => setOpen(false)}
-          classNames={classNames?.view}
-        />
-      </div>
-    );
-  }
-
-  // Modal Sheet on desktop, full-screen on mobile.
-  return (
+  // Modal Sheet on desktop or full-screen Sheet on mobile. Used for both the
+  // explicit `modal` desktop variant and any mobile breakpoint.
+  const sheet = (
     <Sheet open={open} onOpenChange={setOpen}>
       <SheetContent
         side="right"
@@ -229,5 +222,63 @@ export function ChatPanel({
         />
       </SheetContent>
     </Sheet>
+  );
+
+  // Modal mode (and any mobile rendering) just renders the children in their
+  // normal place and overlays the Sheet via Radix's portal.
+  if (isMobile || desktopVariant === 'modal') {
+    return (
+      <>
+        {children}
+        {sheet}
+      </>
+    );
+  }
+
+  // Desktop inline mode: wrap children + the docked chat in a horizontal
+  // flex row that fills its parent. The children area gets `flex-1` so it
+  // shrinks/expands as the chat is resized.
+  return (
+    <div
+      className={cn(
+        'aj-root flex min-h-0 flex-1 flex-row',
+        classNames?.root
+      )}
+    >
+      <div
+        className={cn(
+          'flex min-w-0 flex-1 flex-col overflow-auto',
+          classNames?.body
+        )}
+      >
+        {children}
+      </div>
+      {open ? (
+        <div
+          className={cn(
+            'relative flex h-full shrink-0 flex-col self-stretch border-l border-border bg-background animate-aj-slide-in-right',
+            classNames?.panel
+          )}
+          style={{ width }}
+        >
+          {!disableResize ? (
+            <div
+              onPointerDown={onPointerDown}
+              onPointerMove={onPointerMove}
+              onPointerUp={onPointerUp}
+              className={cn(
+                'absolute left-0 top-0 z-10 h-full w-1.5 -translate-x-1/2 cursor-ew-resize select-none bg-transparent hover:bg-border/60 transition-colors',
+                classNames?.handle
+              )}
+            />
+          ) : null}
+          <ChatView
+            {...viewProps}
+            onClose={() => setOpen(false)}
+            classNames={classNames?.view}
+          />
+        </div>
+      ) : null}
+    </div>
   );
 }

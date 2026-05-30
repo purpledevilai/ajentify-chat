@@ -1,9 +1,10 @@
 'use client';
 
+import type { ReactNode } from 'react';
 import { ChatPanel } from '@ajentify/chat/ui';
 import { useChatPanel } from '../providers';
 
-export function ChatLayer() {
+export function ChatLayer({ children }: { children: ReactNode }) {
   const { open, setOpen } = useChatPanel();
   return (
     <ChatPanel
@@ -11,6 +12,8 @@ export function ChatLayer() {
       onOpenChange={setOpen}
       desktopVariant="inline"
       autoCreateContext
-    />
+    >
+      {children}
+    </ChatPanel>
   );
 }

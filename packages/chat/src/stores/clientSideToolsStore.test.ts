@@ -33,15 +33,15 @@ describe('clientSideToolsStore', () => {
     expect(handler).toHaveBeenCalledWith('refund', { amount: 5 });
   });
 
-  it('routes unknown tools through the fallback handler', async () => {
+  it('routes unknown tools through the client-side tool handler', async () => {
     const store = createClientSideToolsStore();
-    store.getState().setFallbackHandler(async (name) => `fallback:${name}`);
+    store.getState().setClientSideToolHandler(async (name) => `handled:${name}`);
     const response = await store.getState().handleToolCall({
       tool_call_id: 'c3',
       tool_name: 'show_dialog',
       tool_input: {},
     });
-    expect(response).toBe('fallback:show_dialog');
+    expect(response).toBe('handled:show_dialog');
   });
 
   it('throws when do_page_action has no handler mounted', async () => {
@@ -57,7 +57,7 @@ describe('clientSideToolsStore', () => {
 
   it('handleToolCalls bundles responses preserving tool_call_id order', async () => {
     const store = createClientSideToolsStore();
-    store.getState().setFallbackHandler(async (_n, _a, ctx) => `ok:${ctx.toolCallId}`);
+    store.getState().setClientSideToolHandler(async (_n, _a, ctx) => `ok:${ctx.toolCallId}`);
     const result = await store.getState().handleToolCalls([
       { tool_call_id: 'a', tool_name: 'x', tool_input: {} },
       { tool_call_id: 'b', tool_name: 'y', tool_input: {} },

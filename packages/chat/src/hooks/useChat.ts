@@ -15,6 +15,12 @@ export interface UseChatResult {
   /** True when there is no active context yet. */
   hasContext: boolean;
   error: string | null;
+  /**
+   * True between sending a message (or returning client-side tool responses)
+   * and the first streamed token of the agent's reply. UI can show a generic
+   * placeholder ("Thinking…", "Working…", a spinner, etc.) during this window.
+   */
+  isWaitingForResponse: boolean;
   /** Send a human message. No-op when not connected. */
   send: (text: string) => Promise<void>;
   /** Disconnect the WebSocket but keep the messages. */
@@ -44,6 +50,10 @@ export function useChat(): UseChatResult {
     [stores]
   );
 
+  const isWaitingForResponse =
+    (status === 'streaming' || status === 'awaiting_tool_responses') &&
+    !pendingResponse;
+
   return {
     messages,
     pendingResponse,
@@ -51,6 +61,7 @@ export function useChat(): UseChatResult {
     agent,
     hasContext: Boolean(contextId),
     error,
+    isWaitingForResponse,
     send,
     disconnect,
   };

@@ -6,7 +6,7 @@ import {
   type PageData,
 } from '../types';
 
-export type FallbackToolHandler = (
+export type ClientSideToolHandler = (
   toolName: string,
   toolInput: Record<string, unknown>,
   ctx: { toolCallId: string }
@@ -19,11 +19,11 @@ export type PageActionHandler = (
 ) => Promise<unknown> | unknown;
 
 export interface ClientSideToolsStore {
-  fallbackHandler: FallbackToolHandler | null;
+  clientSideToolHandler: ClientSideToolHandler | null;
   pageDataGetter: PageDataGetter | null;
   pageActionHandler: PageActionHandler | null;
 
-  setFallbackHandler: (h: FallbackToolHandler | null) => void;
+  setClientSideToolHandler: (h: ClientSideToolHandler | null) => void;
   setPageDataGetter: (g: PageDataGetter | null) => void;
   setPageActionHandler: (h: PageActionHandler | null) => void;
 
@@ -51,17 +51,17 @@ function asString(value: unknown): string {
 
 export function createClientSideToolsStore() {
   return createStore<ClientSideToolsStore>((set, get) => ({
-    fallbackHandler: null,
+    clientSideToolHandler: null,
     pageDataGetter: null,
     pageActionHandler: null,
 
-    setFallbackHandler: (h) => set({ fallbackHandler: h }),
+    setClientSideToolHandler: (h) => set({ clientSideToolHandler: h }),
     setPageDataGetter: (g) => set({ pageDataGetter: g }),
     setPageActionHandler: (h) => set({ pageActionHandler: h }),
 
     async handleToolCall(call) {
       const { tool_name, tool_input, tool_call_id } = call;
-      const { pageDataGetter, pageActionHandler, fallbackHandler } = get();
+      const { pageDataGetter, pageActionHandler, clientSideToolHandler } = get();
 
       if (tool_name === 'get_page_data') {
         if (!pageDataGetter) {
@@ -103,14 +103,14 @@ export function createClientSideToolsStore() {
         return asString(out ?? { ok: true });
       }
 
-      if (!fallbackHandler) {
+      if (!clientSideToolHandler) {
         throw new AjentifyError(
-          `No handler registered for client-side tool '${tool_name}'. Provide a fallback via the AjentifyProvider's clientSideTools.fallback option.`,
+          `No handler registered for client-side tool '${tool_name}'. Provide a clientSideTools handler on the AjentifyProvider config.`,
           'tool'
         );
       }
 
-      const out = await fallbackHandler(tool_name, tool_input ?? {}, {
+      const out = await clientSideToolHandler(tool_name, tool_input ?? {}, {
         toolCallId: tool_call_id,
       });
       return asString(out);

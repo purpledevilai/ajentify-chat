@@ -74,18 +74,18 @@ export default function App() {
           </div>
         </div>
 
-        <Routes>
-          <Route path="/" element={<HomePage />} />
-          <Route path="/orders" element={<OrdersPage />} />
-          <Route path="/profile" element={<ProfilePage />} />
-        </Routes>
-
         <ChatPanel
           open={chatOpen}
           onOpenChange={setChatOpen}
           desktopVariant="inline"
           autoCreateContext
-        />
+        >
+          <Routes>
+            <Route path="/" element={<HomePage />} />
+            <Route path="/orders" element={<OrdersPage />} />
+            <Route path="/profile" element={<ProfilePage />} />
+          </Routes>
+        </ChatPanel>
       </div>
     </AjentifyProvider>
   );

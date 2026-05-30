@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, type ReactNode } from 'react';
 import {
   createStores,
   type ContextCallbacks,
-  type FallbackToolHandler,
+  type ClientSideToolHandler,
 } from '../stores';
 import type { AjentifyStores } from '../stores/types';
 import type { AgentEvent, AjentifyError } from '../types';
@@ -27,7 +27,7 @@ export interface AjentifyConfig extends ContextCallbacks {
    * arguments, and the call's id; return a string (or anything stringifiable)
    * for the agent.
    */
-  clientSideTools?: FallbackToolHandler;
+  clientSideTools?: ClientSideToolHandler;
   /** Where to persist `{ contextId, accessToken, clientId }`. Defaults to `localStorage`. */
   storage?: StorageOption;
   /** Namespacing key for storage. Defaults to `'ajentify.chat'`. */
@@ -103,7 +103,7 @@ export function AjentifyProvider({ config, children }: AjentifyProviderProps): J
       websocketUrl: config.websocketUrl,
       callbacks: {
         createContext: (req) => configRef.current.createContext(req),
-        generateAccessToken: (args) => configRef.current.generateAccessToken(args),
+        generateAccessToken: () => configRef.current.generateAccessToken(),
         getContext: (id) => configRef.current.getContext(id),
         getContextHistory: () => configRef.current.getContextHistory(),
       },
@@ -118,9 +118,8 @@ export function AjentifyProvider({ config, children }: AjentifyProviderProps): J
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Wire the fallback tool handler through to the client-side tools store.
   useEffect(() => {
-    stores.clientSideTools.getState().setFallbackHandler(
+    stores.clientSideTools.getState().setClientSideToolHandler(
       config.clientSideTools ?? null
     );
   }, [stores, config.clientSideTools]);
