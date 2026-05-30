@@ -188,6 +188,92 @@ export interface HistoryContext {
   agent: HistoryAgent;
 }
 
+// ---------- Ajentify SDK events (consolidated callback) ----------
+
+/**
+ * The discriminated union of every request the SDK sends to the developer's
+ * backend. Instead of providing four separate callbacks, the developer
+ * implements **one** `onAjentifyEvent` handler and routes on `event.type`:
+ *
+ * ```ts
+ * const onAjentifyEvent: AjentifyEventHandler = async (event) => {
+ *   switch (event.type) {
+ *     case 'create_context':       return await api.createContext(event.request);
+ *     case 'generate_access_token': return await api.generateAccessToken();
+ *     case 'get_context':           return await api.getContext(event.contextId);
+ *     case 'get_context_history':   return await api.getContextHistory();
+ *     case 'delete_context':        return await api.deleteContext(event.contextId);
+ *   }
+ * };
+ * ```
+ *
+ * The expected return type for each variant is documented inline below; the
+ * SDK will throw an `AjentifyError` (`code: 'callback'`) if the handler
+ * resolves with an unexpected shape.
+ */
+export type AjentifyEvent =
+  /**
+   * Create a brand new context. The dev's backend should call
+   * `POST /context` with the org-scoped API key and return the response.
+   * Expected resolve type: `CreateContextResponse`.
+   */
+  | { type: 'create_context'; request?: CreateContextRequest }
+  /**
+   * Mint a fresh client access token (JWT) for the current user. The dev's
+   * backend should call `POST /generate-api-key`.
+   * Expected resolve type: `string` (the token).
+   */
+  | { type: 'generate_access_token' }
+  /**
+   * Fetch a single context with its messages. The dev's backend should call
+   * `GET /context/{id}`.
+   * Expected resolve type: `FilteredContext`.
+   */
+  | { type: 'get_context'; contextId: string }
+  /**
+   * Fetch the user's chat history. The dev's backend should call
+   * `GET /context-history`.
+   * Expected resolve type: `HistoryContext[]` or `{ contexts: HistoryContext[] }`.
+   */
+  | { type: 'get_context_history' }
+  /**
+   * Delete a context. The dev's backend should call `DELETE /context/{id}`
+   * (this endpoint is non-public and requires the org API key). The SDK
+   * does not inspect the resolve value.
+   */
+  | { type: 'delete_context'; contextId: string };
+
+/**
+ * Maps each `AjentifyEvent` to the value the handler must resolve with.
+ * Useful when a dev wants to write a strongly-typed dispatcher; otherwise
+ * `AjentifyEventHandler` already enforces this via overloads.
+ */
+export type AjentifyEventResult<E extends AjentifyEvent> = E extends {
+  type: 'create_context';
+}
+  ? CreateContextResponse
+  : E extends { type: 'generate_access_token' }
+    ? string
+    : E extends { type: 'get_context' }
+      ? FilteredContext
+      : E extends { type: 'get_context_history' }
+        ? HistoryContext[] | { contexts: HistoryContext[] }
+        : E extends { type: 'delete_context' }
+          ? void | unknown
+          : never;
+
+/**
+ * The single function a developer registers on `<AjentifyProvider>` to
+ * service every backend request the SDK needs to make. Receives a fully
+ * typed discriminated event; should resolve with the matching value (see
+ * `AjentifyEventResult` / the JSDoc on each event variant).
+ *
+ * Returns may be either a `Promise` or a sync value.
+ */
+export type AjentifyEventHandler = (
+  event: AjentifyEvent
+) => Promise<unknown> | unknown;
+
 // ---------- Errors ----------
 
 export type AjentifyErrorCode =

@@ -120,6 +120,92 @@ async function ajentifyFetch<T = unknown>(
   return payload as T;
 }
 
+// --------- event router ---------
+
+/**
+ * The shape mirrors `AjentifyEvent` from `@ajentify/chat`. We re-declare it
+ * here so the example backend can stay decoupled from the SDK package.
+ */
+type AjentifyEvent =
+  | { type: 'create_context'; request?: Record<string, unknown> }
+  | { type: 'generate_access_token' }
+  | { type: 'get_context'; contextId: string }
+  | { type: 'get_context_history' }
+  | { type: 'delete_context'; contextId: string };
+
+async function routeAjentifyEvent(
+  event: AjentifyEvent,
+  user: UserRecord
+): Promise<unknown> {
+  switch (event.type) {
+    case 'create_context': {
+      const created = await ajentifyFetch<{
+        context_id: string;
+        client_id?: string;
+        client_api_key?: string | null;
+        [k: string]: unknown;
+      }>('/context', {
+        method: 'POST',
+        body: {
+          agent_id: AGENT_ID,
+          ...(event.request ?? {}),
+          client_id: user.clientId ?? undefined,
+        },
+      });
+      if (created.client_id && created.client_id !== user.clientId) {
+        user.clientId = created.client_id;
+        saveUsers(users);
+      }
+      return created;
+    }
+
+    case 'generate_access_token': {
+      if (!user.clientId) {
+        const err = new Error(
+          'No client_id known for this user; create a context first.'
+        );
+        (err as Error & { status?: number }).status = 409;
+        throw err;
+      }
+      const minted = await ajentifyFetch<{ token: string; [k: string]: unknown }>(
+        '/generate-api-key',
+        {
+          method: 'POST',
+          body: {
+            org_id: ORG_ID,
+            type: 'client',
+            client_id: user.clientId,
+          },
+        }
+      );
+      return minted;
+    }
+
+    case 'get_context': {
+      return ajentifyFetch(`/context/${event.contextId}`);
+    }
+
+    case 'get_context_history': {
+      if (!user.clientId) return { contexts: [] };
+      return ajentifyFetch<{ contexts: unknown[] }>('/context-history', {
+        query: { client_id: user.clientId },
+      });
+    }
+
+    case 'delete_context': {
+      // `DELETE /context/{id}` is a non-public endpoint; using the org API
+      // key is the whole point of routing this through the dev's backend.
+      await ajentifyFetch(`/context/${event.contextId}`, { method: 'DELETE' });
+      return { success: true };
+    }
+
+    default: {
+      const exhaustive: never = event;
+      throw new Error(`unsupported event: ${JSON.stringify(exhaustive)}`);
+    }
+  }
+}
+
 // --------- app ---------
 
 const app = express();
@@ -131,102 +217,28 @@ app.get('/health', (_req, res) => {
 });
 
 /**
- * POST /api/ajentify/context
- * Creates a context for the demo user (reusing client_id when known).
+ * POST /api/ajentify/event
+ *
+ * Single endpoint the chat SDK posts every backend request to. The body is
+ * an `AjentifyEvent`; we route on `event.type` and proxy to the matching
+ * Ajentify REST endpoint with the org API key.
  */
-app.post('/api/ajentify/context', async (req, res) => {
+app.post('/api/ajentify/event', async (req, res) => {
+  const event = req.body as AjentifyEvent | undefined;
+  if (!event || typeof event !== 'object' || !('type' in event)) {
+    res.status(400).json({ error: 'Body must be an AjentifyEvent { type, ... }' });
+    return;
+  }
   const user = getOrCreateUser(req, res);
   try {
-    const body = (req.body ?? {}) as Record<string, unknown>;
-    const created = await ajentifyFetch<{
-      context_id: string;
-      client_id?: string;
-      client_api_key?: string | null;
-      [k: string]: unknown;
-    }>('/context', {
-      method: 'POST',
-      body: {
-        agent_id: AGENT_ID,
-        ...body,
-        client_id: user.clientId ?? undefined,
-      },
-    });
-    if (created.client_id && created.client_id !== user.clientId) {
-      user.clientId = created.client_id;
-      saveUsers(users);
-    }
-    res.json(created);
+    const result = await routeAjentifyEvent(event, user);
+    res.json(result);
   } catch (err) {
     const status = (err as { status?: number }).status ?? 500;
     res.status(status).json({
       error: (err as Error).message,
       payload: (err as { payload?: unknown }).payload,
     });
-  }
-});
-
-/**
- * GET /api/ajentify/context/:id
- */
-app.get('/api/ajentify/context/:id', async (req, res) => {
-  try {
-    const ctx = await ajentifyFetch(`/context/${req.params.id}`);
-    res.json(ctx);
-  } catch (err) {
-    const status = (err as { status?: number }).status ?? 500;
-    res.status(status).json({ error: (err as Error).message });
-  }
-});
-
-/**
- * POST /api/ajentify/token
- * Mints a 2-minute client API key scoped to the user's client_id.
- */
-app.post('/api/ajentify/token', async (req, res) => {
-  const user = getOrCreateUser(req, res);
-  try {
-    if (!user.clientId) {
-      res.status(409).json({
-        error: 'No client_id known for this user; create a context first.',
-      });
-      return;
-    }
-    const minted = await ajentifyFetch<{ token: string; [k: string]: unknown }>(
-      '/generate-api-key',
-      {
-        method: 'POST',
-        body: {
-          org_id: ORG_ID,
-          type: 'client',
-          client_id: user.clientId,
-        },
-      }
-    );
-    res.json({ ...minted, token: minted.token });
-  } catch (err) {
-    const status = (err as { status?: number }).status ?? 500;
-    res.status(status).json({ error: (err as Error).message });
-  }
-});
-
-/**
- * GET /api/ajentify/context-history
- */
-app.get('/api/ajentify/context-history', async (req, res) => {
-  const user = getOrCreateUser(req, res);
-  try {
-    if (!user.clientId) {
-      res.json({ contexts: [] });
-      return;
-    }
-    const history = await ajentifyFetch<{ contexts: unknown[] }>(
-      '/context-history',
-      { query: { client_id: user.clientId } }
-    );
-    res.json(history);
-  } catch (err) {
-    const status = (err as { status?: number }).status ?? 500;
-    res.status(status).json({ error: (err as Error).message });
   }
 });
 

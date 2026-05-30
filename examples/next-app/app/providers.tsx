@@ -4,7 +4,7 @@ import { createContext, useCallback, useContext, useMemo, useState, type ReactNo
 import { useRouter } from 'next/navigation';
 import { ThemeProvider } from 'next-themes';
 import { AjentifyProvider } from '@ajentify/chat';
-import { api } from './_lib/api';
+import { ajentifyEvent } from './_lib/api';
 
 interface ChatPanelControl {
   open: boolean;
@@ -54,11 +54,7 @@ export function Providers({ children }: { children: ReactNode }) {
     <ThemeProvider attribute="class" defaultTheme="light">
       <AjentifyProvider
         config={{
-          createContext: api.createContext,
-          getContext: api.getContext,
-          generateAccessToken: () => api.generateAccessToken(),
-          getContextHistory: () =>
-            api.getContextHistory().then((r) => r.contexts),
+          onAjentifyEvent: ajentifyEvent,
           clientSideTools,
           onError: (err) => {
             console.error('[ajentify]', err);

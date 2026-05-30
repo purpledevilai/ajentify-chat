@@ -2,7 +2,7 @@ import { useCallback, useState } from 'react';
 import { Link, NavLink, Route, Routes, useNavigate } from 'react-router-dom';
 import { AjentifyProvider } from '@ajentify/chat';
 import { ChatPanel } from '@ajentify/chat/ui';
-import { api } from './api';
+import { ajentifyEvent } from './api';
 import { OrdersPage } from './pages/OrdersPage';
 import { ProfilePage } from './pages/ProfilePage';
 import { HomePage } from './pages/HomePage';
@@ -36,10 +36,7 @@ export default function App() {
   return (
     <AjentifyProvider
       config={{
-        createContext: api.createContext,
-        getContext: api.getContext,
-        generateAccessToken: () => api.generateAccessToken(),
-        getContextHistory: () => api.getContextHistory().then((r) => r.contexts),
+        onAjentifyEvent: ajentifyEvent,
         clientSideTools,
         onError: (err) => {
           console.error('[ajentify]', err);

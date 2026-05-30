@@ -1,7 +1,7 @@
 'use client';
 
 import * as React from 'react';
-import { ArrowLeft, MessageSquare, Plus } from 'lucide-react';
+import { ArrowLeft, MessageSquare, Plus, Trash2 } from 'lucide-react';
 import { useContextHistory } from '../hooks/useContextHistory';
 import { cn } from '../lib/utils';
 import { IconButton } from './primitives/IconButton';
@@ -19,6 +19,12 @@ export interface ChatHistoryProps {
   onBack?: () => void;
   /** Auto-load history on mount. Defaults to true. */
   autoLoad?: boolean;
+  /**
+   * Show a per-row delete button that dispatches a `delete_context` event.
+   * Defaults to true. Pass `false` if your backend doesn't support deletion
+   * or you want to handle it elsewhere.
+   */
+  enableDelete?: boolean;
   classNames?: ChatHistoryClassNames;
 }
 
@@ -40,22 +46,41 @@ function formatTimestamp(unixSeconds: number): string {
 export function ChatHistory({
   onBack,
   autoLoad = true,
+  enableDelete = true,
   classNames,
 }: ChatHistoryProps): JSX.Element {
   const {
     history,
     loading,
     error,
-    load,
+    loaded,
+    ensureLoaded,
     switchTo,
     createNew,
+    deleteContext,
     currentContextId,
   } = useContextHistory();
 
+  const [deletingId, setDeletingId] = React.useState<string | null>(null);
+
   React.useEffect(() => {
-    if (autoLoad) void load();
+    if (autoLoad) void ensureLoaded();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoLoad]);
+
+  const onDelete = React.useCallback(
+    async (contextId: string) => {
+      setDeletingId(contextId);
+      try {
+        await deleteContext(contextId);
+      } catch {
+        // The store already surfaces the error via onError; nothing else to do.
+      } finally {
+        setDeletingId(null);
+      }
+    },
+    [deleteContext]
+  );
 
   return (
     <div className={cn('flex h-full w-full flex-col bg-background', classNames?.root)}>
@@ -87,9 +112,9 @@ export function ChatHistory({
       </div>
 
       <div className="flex-1 overflow-y-auto">
-        {loading ? (
+        {loading && !loaded ? (
           <div className="px-4 py-6 text-sm text-muted-foreground">Loading…</div>
-        ) : error ? (
+        ) : error && !loaded ? (
           <div className="px-4 py-6 text-sm text-destructive">
             Failed to load history: {error}
           </div>
@@ -107,8 +132,9 @@ export function ChatHistory({
           <ul className="divide-y divide-border">
             {history.map((h) => {
               const isCurrent = h.context_id === currentContextId;
+              const isDeleting = deletingId === h.context_id;
               return (
-                <li key={h.context_id}>
+                <li key={h.context_id} className="group relative">
                   <button
                     type="button"
                     onClick={() => {
@@ -116,7 +142,7 @@ export function ChatHistory({
                       onBack?.();
                     }}
                     className={cn(
-                      'flex w-full flex-col items-start gap-1 px-4 py-3 text-left hover:bg-accent/60 transition-colors',
+                      'flex w-full flex-col items-start gap-1 px-4 py-3 pr-12 text-left hover:bg-accent/60 transition-colors',
                       isCurrent && 'bg-accent/40',
                       classNames?.item
                     )}
@@ -133,6 +159,21 @@ export function ChatHistory({
                       {h.last_message || '(empty conversation)'}
                     </span>
                   </button>
+                  {enableDelete ? (
+                    <div className="absolute right-2 top-1/2 -translate-y-1/2">
+                      <IconButton
+                        label="Delete chat"
+                        disabled={isDeleting}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          void onDelete(h.context_id);
+                        }}
+                        className="opacity-60 transition-opacity hover:opacity-100 hover:text-destructive"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </IconButton>
+                    </div>
+                  ) : null}
                 </li>
               );
             })}

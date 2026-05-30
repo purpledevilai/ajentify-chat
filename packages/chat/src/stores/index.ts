@@ -6,7 +6,6 @@ export {
 } from './currentContextStore';
 export {
   createContextsStore,
-  type ContextCallbacks,
   type ContextsStore,
   type ContextsStoreOptions,
 } from './contextsStore';

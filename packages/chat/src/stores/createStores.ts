@@ -4,14 +4,15 @@ import {
 } from './currentContextStore';
 import {
   createContextsStore,
-  type ContextCallbacks,
   type ContextsStoreOptions,
 } from './contextsStore';
 import { createClientSideToolsStore } from './clientSideToolsStore';
 import type { AjentifyStores } from './types';
+import type { AjentifyEventHandler } from '../types';
 
 export interface CreateStoresOptions {
-  callbacks: ContextCallbacks;
+  /** Single dispatcher routing every backend request through one handler. */
+  onAjentifyEvent: AjentifyEventHandler;
   websocketUrl?: string;
   storage?: ContextsStoreOptions['storage'];
   storageKey?: string;
@@ -29,7 +30,7 @@ export interface CreateStoresOptions {
  */
 export function createStores(options: CreateStoresOptions): AjentifyStores {
   const contexts = createContextsStore({
-    callbacks: options.callbacks,
+    onEvent: options.onAjentifyEvent,
     storage: options.storage,
     storageKey: options.storageKey,
   });

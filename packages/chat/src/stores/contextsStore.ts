@@ -1,6 +1,9 @@
 import { createStore } from 'zustand/vanilla';
 import {
   AjentifyError,
+  type AjentifyEvent,
+  type AjentifyEventHandler,
+  type AjentifyEventResult,
   type CreateContextRequest,
   type CreateContextResponse,
   type FilteredContext,
@@ -8,36 +11,13 @@ import {
 } from '../types';
 import { createSafeStorage } from '../lib/utils';
 
-/**
- * The four callbacks the developer must provide to the provider. Each one
- * should hit the developer's own backend (which proxies to the Ajentify REST
- * API using the org-scoped API key).
- */
-export interface ContextCallbacks {
-  /**
-   * Create a new context. The dev's backend calls `POST /context`. May omit
-   * `agent_id` server-side if the backend has it hard-coded.
-   */
-  createContext: (
-    req?: CreateContextRequest
-  ) => Promise<CreateContextResponse>;
-
-  /**
-   * Mint a fresh access token for connecting to a context. The dev's backend
-   * calls `POST /generate-api-key` and returns the JWT string. It is the
-   * callback's responsibility to identify the user (e.g. via session cookie).
-   */
-  generateAccessToken: () => Promise<string>;
-
-  /** Fetch full context messages. Dev's backend calls `GET /context/{id}`. */
-  getContext: (contextId: string) => Promise<FilteredContext>;
-
-  /** Fetch the user's context history. Dev's backend calls `GET /context-history`. */
-  getContextHistory: () => Promise<HistoryContext[] | { contexts: HistoryContext[] }>;
-}
-
 export interface ContextsStoreOptions {
-  callbacks: ContextCallbacks;
+  /**
+   * The single handler the developer provides on `<AjentifyProvider>`. Every
+   * backend request the SDK makes is dispatched through this function as a
+   * tagged `AjentifyEvent`. See the type's JSDoc for the per-variant contract.
+   */
+  onEvent: AjentifyEventHandler;
   storage?: Storage | null;
   storageKey?: string;
 }
@@ -61,6 +41,8 @@ export interface ContextsStore {
   history: HistoryContext[];
   historyLoading: boolean;
   historyError: string | null;
+  /** True after the first successful `loadHistory()` call this session. */
+  historyLoaded: boolean;
 
   /** Whether a createContext call is currently in flight. */
   creating: boolean;
@@ -93,8 +75,29 @@ export interface ContextsStore {
   /** Load the messages for a context by id. */
   loadContext: (contextId: string) => Promise<FilteredContext>;
 
-  /** Load the user's chat history. */
+  /**
+   * Force a refetch of the user's chat history. Concurrent calls share the
+   * same in-flight request.
+   */
   loadHistory: () => Promise<HistoryContext[]>;
+
+  /**
+   * Return the cached history if it has already been loaded this session;
+   * otherwise call `loadHistory()`. Use this for "open the history view"
+   * flows so we don't refetch on every mount.
+   */
+  ensureHistoryLoaded: () => Promise<HistoryContext[]>;
+
+  /** Mark the cached history as stale so the next `ensureHistoryLoaded()` refetches. */
+  invalidateHistory: () => void;
+
+  /**
+   * Delete a context via the dev's backend. Optimistically drops it from the
+   * cached history list and clears the persisted current context if it was
+   * the one being deleted. Throws an `AjentifyError` (`code: 'callback'`) if
+   * the handler rejects.
+   */
+  deleteContext: (contextId: string) => Promise<void>;
 }
 
 const STORAGE_VERSION = 1;
@@ -128,11 +131,27 @@ function writePersisted(
   }
 }
 
+/**
+ * Type-narrowing wrapper around the dev's `onEvent` handler. Awaits sync or
+ * async returns and casts the result to whatever the caller's event variant
+ * is supposed to resolve with.
+ */
+async function dispatch<E extends AjentifyEvent>(
+  onEvent: AjentifyEventHandler,
+  event: E
+): Promise<AjentifyEventResult<E>> {
+  return (await onEvent(event)) as AjentifyEventResult<E>;
+}
+
 export function createContextsStore(options: ContextsStoreOptions) {
   const storage = options.storage === null ? null : options.storage ?? createSafeStorage('localStorage');
   const storageKey = options.storageKey ?? 'ajentify.chat';
 
   const persisted = readPersisted(storage, storageKey);
+
+  // Dedupes concurrent `loadHistory()` callers so e.g. ChatHistory mounting
+  // while a refresh is already in flight reuses the same promise.
+  let inFlightHistoryLoad: Promise<HistoryContext[]> | null = null;
 
   const store = createStore<ContextsStore>((set, get) => ({
     contextId: persisted?.contextId ?? null,
@@ -142,6 +161,7 @@ export function createContextsStore(options: ContextsStoreOptions) {
     history: [],
     historyLoading: false,
     historyError: null,
+    historyLoaded: false,
 
     creating: false,
     createError: null,
@@ -172,7 +192,10 @@ export function createContextsStore(options: ContextsStoreOptions) {
     createContext: async (req) => {
       set({ creating: true, createError: null });
       try {
-        const created = await options.callbacks.createContext(req);
+        const created = await dispatch(options.onEvent, {
+          type: 'create_context',
+          request: req,
+        });
         const newClientId = created.client_id ?? get().clientId ?? null;
         // Public-agent flows return a long-lived `client_api_key` on creation.
         // For private flows the dev's backend either returned it on the
@@ -189,20 +212,31 @@ export function createContextsStore(options: ContextsStoreOptions) {
           accessToken,
           clientId: newClientId,
         });
+        // Refresh the cached history so the new context shows up next time
+        // the user opens the history panel. Fire-and-forget — failures are
+        // surfaced via `historyError`.
+        if (get().historyLoaded) {
+          void get().loadHistory().catch(() => {
+            // already captured into historyError
+          });
+        }
         return created;
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         set({ creating: false, createError: msg });
-        throw new AjentifyError('createContext callback failed', 'callback', err);
+        if (err instanceof AjentifyError) throw err;
+        throw new AjentifyError('create_context callback failed', 'callback', err);
       }
     },
 
     generateAccessToken: async () => {
       try {
-        const token = await options.callbacks.generateAccessToken();
+        const token = await dispatch(options.onEvent, {
+          type: 'generate_access_token',
+        });
         if (typeof token !== 'string' || token.length === 0) {
           throw new AjentifyError(
-            'generateAccessToken callback returned an empty token',
+            'generate_access_token callback returned an empty token',
             'callback'
           );
         }
@@ -216,16 +250,23 @@ export function createContextsStore(options: ContextsStoreOptions) {
         return token;
       } catch (err) {
         if (err instanceof AjentifyError) throw err;
-        throw new AjentifyError('generateAccessToken callback failed', 'callback', err);
+        throw new AjentifyError(
+          'generate_access_token callback failed',
+          'callback',
+          err
+        );
       }
     },
 
     loadContext: async (contextId) => {
       try {
-        const ctx = await options.callbacks.getContext(contextId);
+        const ctx = await dispatch(options.onEvent, {
+          type: 'get_context',
+          contextId,
+        });
         if (!ctx?.context_id) {
           throw new AjentifyError(
-            'getContext callback returned an invalid context payload',
+            'get_context callback returned an invalid context payload',
             'callback'
           );
         }
@@ -235,21 +276,70 @@ export function createContextsStore(options: ContextsStoreOptions) {
         return ctx;
       } catch (err) {
         if (err instanceof AjentifyError) throw err;
-        throw new AjentifyError('getContext callback failed', 'callback', err);
+        throw new AjentifyError('get_context callback failed', 'callback', err);
       }
     },
 
     loadHistory: async () => {
+      if (inFlightHistoryLoad) return inFlightHistoryLoad;
       set({ historyLoading: true, historyError: null });
+      inFlightHistoryLoad = (async () => {
+        try {
+          const raw = await dispatch(options.onEvent, {
+            type: 'get_context_history',
+          });
+          const list: HistoryContext[] = Array.isArray(raw)
+            ? raw
+            : (raw as { contexts?: HistoryContext[] })?.contexts ?? [];
+          set({ history: list, historyLoading: false, historyLoaded: true });
+          return list;
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          set({ historyLoading: false, historyError: msg });
+          throw new AjentifyError(
+            'get_context_history callback failed',
+            'callback',
+            err
+          );
+        } finally {
+          inFlightHistoryLoad = null;
+        }
+      })();
+      return inFlightHistoryLoad;
+    },
+
+    ensureHistoryLoaded: async () => {
+      const s = get();
+      if (s.historyLoaded) return s.history;
+      return get().loadHistory();
+    },
+
+    invalidateHistory: () => {
+      set({ historyLoaded: false });
+    },
+
+    deleteContext: async (contextId) => {
       try {
-        const raw = await options.callbacks.getContextHistory();
-        const list: HistoryContext[] = Array.isArray(raw) ? raw : raw.contexts ?? [];
-        set({ history: list, historyLoading: false });
-        return list;
+        await dispatch(options.onEvent, { type: 'delete_context', contextId });
       } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        set({ historyLoading: false, historyError: msg });
-        throw new AjentifyError('getContextHistory callback failed', 'callback', err);
+        if (err instanceof AjentifyError) throw err;
+        throw new AjentifyError(
+          'delete_context callback failed',
+          'callback',
+          err
+        );
+      }
+      // Drop it from the cached history list (if loaded). We do this whether
+      // the list was loaded or not — `historyLoaded` stays unchanged so the
+      // next `ensureHistoryLoaded()` still treats the cache as authoritative.
+      set({
+        history: get().history.filter((h) => h.context_id !== contextId),
+      });
+      // If we just deleted the active context, drop it from local state /
+      // storage so the UI knows there's nothing connected. The current-context
+      // store is responsible for tearing down its own WebSocket via the hook.
+      if (get().contextId === contextId) {
+        get().clearCurrentContext();
       }
     },
   }));

@@ -1,13 +1,10 @@
-import type {
-  CreateContextRequest,
-  CreateContextResponse,
-  FilteredContext,
-  HistoryContext,
-} from '@ajentify/chat';
+import type { AjentifyEvent } from '@ajentify/chat';
 
 /**
- * Helpers for talking to the dev backend (which proxies to Ajentify with the
- * org API key). The Vite dev server proxies `/api/ajentify` to :4000.
+ * Single helper that POSTs an `AjentifyEvent` to our dev backend's
+ * `/api/ajentify/event` endpoint, which routes on `event.type` and proxies
+ * to the Ajentify REST API using the org-scoped API key. The Vite dev
+ * server proxies `/api/ajentify` to :4000.
  */
 
 const base = '/api/ajentify';
@@ -30,37 +27,27 @@ async function jsonOrThrow<T>(res: Response): Promise<T> {
   return payload as T;
 }
 
-export const api = {
-  async createContext(req?: CreateContextRequest): Promise<CreateContextResponse> {
-    const res = await fetch(`${base}/context`, {
-      method: 'POST',
-      credentials: 'include',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(req ?? {}),
-    });
-    return jsonOrThrow<CreateContextResponse>(res);
-  },
-  async getContext(contextId: string): Promise<FilteredContext> {
-    const res = await fetch(`${base}/context/${contextId}`, {
-      credentials: 'include',
-    });
-    return jsonOrThrow<FilteredContext>(res);
-  },
-  async generateAccessToken(): Promise<string> {
-    // The dev backend mints the token from the demo user's client_id (stored
-    // in the session cookie), so there's nothing to send in the body — the
-    // Ajentify /generate-api-key endpoint itself only needs the client_id.
-    const res = await fetch(`${base}/token`, {
-      method: 'POST',
-      credentials: 'include',
-    });
-    const { token } = await jsonOrThrow<{ token: string }>(res);
-    return token;
-  },
-  async getContextHistory(): Promise<{ contexts: HistoryContext[] }> {
-    const res = await fetch(`${base}/context-history`, {
-      credentials: 'include',
-    });
-    return jsonOrThrow<{ contexts: HistoryContext[] }>(res);
-  },
-};
+/**
+ * The single function the developer hands to `<AjentifyProvider>`. The chat
+ * SDK calls this for *every* backend operation (create / fetch / list /
+ * delete contexts, mint access tokens) — the only thing we need to do is
+ * forward the event and unwrap any response shape that doesn't already
+ * match what the SDK expects.
+ */
+export async function ajentifyEvent(event: AjentifyEvent): Promise<unknown> {
+  const res = await fetch(`${base}/event`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(event),
+  });
+  const payload = await jsonOrThrow<unknown>(res);
+
+  // The /generate-api-key endpoint upstream returns `{ token, ... }`. The
+  // SDK's `generate_access_token` event expects just the token string, so
+  // unwrap here to keep the dev backend's proxy 1:1 with the upstream API.
+  if (event.type === 'generate_access_token') {
+    return (payload as { token: string }).token;
+  }
+  return payload;
+}

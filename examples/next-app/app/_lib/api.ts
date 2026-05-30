@@ -1,13 +1,10 @@
-import type {
-  CreateContextRequest,
-  CreateContextResponse,
-  FilteredContext,
-  HistoryContext,
-} from '@ajentify/chat';
+import type { AjentifyEvent } from '@ajentify/chat';
 
 /**
- * Thin client for the dev backend. Next.js rewrites `/api/ajentify/*` to
- * the Express server at :4000 (see `next.config.mjs`).
+ * Single helper that POSTs an `AjentifyEvent` to our dev backend's
+ * `/api/ajentify/event` endpoint, which routes on `event.type` and proxies
+ * to the Ajentify REST API using the org-scoped API key. Next.js rewrites
+ * `/api/ajentify/*` to the Express server at :4000 (see `next.config.mjs`).
  */
 
 const base = '/api/ajentify';
@@ -30,37 +27,25 @@ async function jsonOrThrow<T>(res: Response): Promise<T> {
   return payload as T;
 }
 
-export const api = {
-  async createContext(req?: CreateContextRequest): Promise<CreateContextResponse> {
-    const res = await fetch(`${base}/context`, {
-      method: 'POST',
-      credentials: 'include',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(req ?? {}),
-    });
-    return jsonOrThrow<CreateContextResponse>(res);
-  },
-  async getContext(contextId: string): Promise<FilteredContext> {
-    const res = await fetch(`${base}/context/${contextId}`, {
-      credentials: 'include',
-    });
-    return jsonOrThrow<FilteredContext>(res);
-  },
-  async generateAccessToken(): Promise<string> {
-    // The dev backend mints the token from the demo user's client_id (stored
-    // in the session cookie), so there's nothing to send in the body — the
-    // Ajentify /generate-api-key endpoint itself only needs the client_id.
-    const res = await fetch(`${base}/token`, {
-      method: 'POST',
-      credentials: 'include',
-    });
-    const { token } = await jsonOrThrow<{ token: string }>(res);
-    return token;
-  },
-  async getContextHistory(): Promise<{ contexts: HistoryContext[] }> {
-    const res = await fetch(`${base}/context-history`, {
-      credentials: 'include',
-    });
-    return jsonOrThrow<{ contexts: HistoryContext[] }>(res);
-  },
-};
+/**
+ * The single function the developer hands to `<AjentifyProvider>`. The chat
+ * SDK calls this for *every* backend operation — we just forward the event
+ * to our proxy and unwrap any response that doesn't already match the SDK's
+ * expected shape.
+ */
+export async function ajentifyEvent(event: AjentifyEvent): Promise<unknown> {
+  const res = await fetch(`${base}/event`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(event),
+  });
+  const payload = await jsonOrThrow<unknown>(res);
+
+  // The /generate-api-key endpoint upstream returns `{ token, ... }`. The
+  // SDK's `generate_access_token` event expects just the token string.
+  if (event.type === 'generate_access_token') {
+    return (payload as { token: string }).token;
+  }
+  return payload;
+}

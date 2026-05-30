@@ -3,11 +3,14 @@
 import { useEffect, useMemo, useRef, type ReactNode } from 'react';
 import {
   createStores,
-  type ContextCallbacks,
   type ClientSideToolHandler,
 } from '../stores';
 import type { AjentifyStores } from '../stores/types';
-import type { AgentEvent, AjentifyError } from '../types';
+import type {
+  AgentEvent,
+  AjentifyError,
+  AjentifyEventHandler,
+} from '../types';
 import { createSafeStorage } from '../lib/utils';
 import { AjentifyContext } from './context';
 
@@ -18,7 +21,15 @@ export type StorageOption =
   | Storage
   | null;
 
-export interface AjentifyConfig extends ContextCallbacks {
+export interface AjentifyConfig {
+  /**
+   * Single async handler that services every backend request the SDK makes
+   * (create context, fetch context, mint access tokens, list history, delete
+   * context). The dev's backend should expose **one** endpoint that routes
+   * on `event.type` and proxies to the Ajentify REST API with their org
+   * API key. See `AjentifyEvent` for the variant contract.
+   */
+  onAjentifyEvent: AjentifyEventHandler;
   /** Override the token streaming WebSocket URL. */
   websocketUrl?: string;
   /**
@@ -101,12 +112,10 @@ export function AjentifyProvider({ config, children }: AjentifyProviderProps): J
   const stores: AjentifyStores = useMemo(() => {
     return createStores({
       websocketUrl: config.websocketUrl,
-      callbacks: {
-        createContext: (req) => configRef.current.createContext(req),
-        generateAccessToken: () => configRef.current.generateAccessToken(),
-        getContext: (id) => configRef.current.getContext(id),
-        getContextHistory: () => configRef.current.getContextHistory(),
-      },
+      // Always read through the latest config ref so dev callbacks can change
+      // their closure (e.g. router/auth) across renders without us rebuilding
+      // the stores or losing the WebSocket.
+      onAjentifyEvent: (event) => configRef.current.onAjentifyEvent(event),
       storage: resolveStorage(config.storage),
       storageKey: config.storageKey,
       WebSocketImpl: config.WebSocketImpl,
