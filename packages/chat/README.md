@@ -145,9 +145,40 @@ import { ChatPanel, ChatView, ChatHeader, ChatMessages, ChatInput } from '@ajent
 
 `<ChatPanel />` is opinionated: slide-in from the right, draggable resize handle on desktop, full-screen sheet on mobile. `<ChatView />` is the fill-parent variant if you want to drop it inside your own layout.
 
+### Mount behaviour
+
+When `<ChatView />` (or `<ChatPanel />`) mounts on a fresh session, it auto-calls `startNewContext()` so the user lands on a ready-to-type chat. The provider's `agentSpeaksFirst` flag is the only knob:
+
+- `agentSpeaksFirst: false` (default) — enters a local `'draft'` state. No `create_context` call is made until the user sends their first message. Cheap mounts; perfect for embeds where most opens never become real conversations.
+- `agentSpeaksFirst: true` — eagerly calls `create_context` and opens the WebSocket so the agent can stream its greeting before the user types.
+
+```tsx
+<AjentifyProvider config={{ ...rest, agentSpeaksFirst: true }}>
+  <ChatPanel />
+</AjentifyProvider>
+```
+
+If the eager call fails, the chat falls back to a "Couldn't start a new chat — Try again" affordance and does not auto-retry. Customise it with the `emptyState` prop on `<ChatView />` / `<ChatPanel />`.
+
 ## Theming
 
-The chat uses CSS variables under the `--aj-*` namespace. To re-skin, override them in your stylesheet:
+The chat is themed entirely through **CSS custom properties** under the
+`--aj-*` namespace. That means:
+
+- Theme changes are **live** — toggling a class on `<html>` (or swapping a
+  `data-theme` attribute, or matching `prefers-color-scheme`) re-resolves the
+  variables and the chat repaints in place. No React props to thread, no
+  re-renders.
+- Whatever styling system your host uses works — Tailwind, plain CSS, CSS-in-JS,
+  Radix Themes, Mantine, MUI — as long as you can set CSS variables.
+
+Pick the integration that matches your app:
+
+### 1. Direct: define `--aj-*` yourself
+
+The simplest path. Override any token in your own stylesheet — values are
+HSL channels (no `hsl(...)` wrapper, no commas) so the chat can compose them
+with alpha utilities:
 
 ```css
 :root {
@@ -156,12 +187,55 @@ The chat uses CSS variables under the `--aj-*` namespace. To re-skin, override t
 }
 .dark {
   --aj-background: 240 10% 4%;
+  --aj-foreground: 0 0% 98%;
 }
 ```
 
-If you already use shadcn/ui, add `themeBridge: 'shadcn'` to the provider config and the chat will pick up your existing tokens automatically.
+No provider config needed. Toggle dark mode by adding/removing `class="dark"`
+on `<html>` (or any ancestor of the chat) — the chat updates immediately.
 
-Every component also accepts a `classNames` prop for per-slot Tailwind overrides:
+### 2. shadcn/ui bridge
+
+If your app already defines shadcn's un-prefixed `--background`, `--foreground`,
+`--primary`, ... tokens, point the chat at them with one option:
+
+```tsx
+<AjentifyProvider config={{ ...rest, themeBridge: 'shadcn' }}>
+```
+
+The bridge declares aliases under `:root`, `.dark`, **and** `[data-theme]`,
+so dark-mode shadcn values reach the chat regardless of which selector
+strategy you use to flip themes.
+
+### 3. Custom token map
+
+For hosts that don't follow the shadcn naming, hand the bridge a map from
+chat tokens to your own variable names:
+
+```tsx
+<AjentifyProvider
+  config={{
+    ...rest,
+    themeBridge: {
+      tokens: {
+        background: '--my-app-bg',
+        foreground: '--my-app-fg',
+        primary: '--my-app-accent',
+        border: '--my-app-line',
+      },
+      // optional — defaults to [':root', '.dark', '[data-theme]']
+      // selectors: [':root', '[data-mode="dark"]'],
+    },
+  }}
+>
+```
+
+Any tokens you don't list keep their built-in defaults, so you can theme as
+much or as little as you want.
+
+### Per-slot overrides
+
+Every component also accepts a `classNames` prop for fine-grained tweaks:
 
 ```tsx
 <ChatView classNames={{ messages: { aiBubble: 'bg-blue-100' } }} />

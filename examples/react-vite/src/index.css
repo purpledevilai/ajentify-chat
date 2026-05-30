@@ -1,3 +1,71 @@
+/*
+ * Plain-CSS theming demo. We define the chat package's `--aj-*` tokens
+ * directly (no Tailwind, no themeBridge) and reuse the same variables
+ * for the host app's chrome — so toggling `class="dark"` on <html>
+ * re-themes both the page and the chat panel in lockstep, live.
+ */
+:root {
+  --aj-background: 0 0% 100%;
+  --aj-foreground: 240 10% 4%;
+
+  --aj-card: 0 0% 100%;
+  --aj-card-foreground: 240 10% 4%;
+
+  --aj-popover: 0 0% 100%;
+  --aj-popover-foreground: 240 10% 4%;
+
+  --aj-primary: 240 6% 10%;
+  --aj-primary-foreground: 0 0% 98%;
+
+  --aj-secondary: 240 5% 96%;
+  --aj-secondary-foreground: 240 6% 10%;
+
+  --aj-muted: 240 5% 96%;
+  --aj-muted-foreground: 240 4% 46%;
+
+  --aj-accent: 240 5% 96%;
+  --aj-accent-foreground: 240 6% 10%;
+
+  --aj-destructive: 0 84% 60%;
+  --aj-destructive-foreground: 0 0% 98%;
+
+  --aj-border: 240 6% 90%;
+  --aj-input: 240 6% 90%;
+  --aj-ring: 240 6% 10%;
+
+  --aj-radius: 0.75rem;
+}
+
+.dark {
+  --aj-background: 240 10% 4%;
+  --aj-foreground: 0 0% 98%;
+
+  --aj-card: 240 10% 6%;
+  --aj-card-foreground: 0 0% 98%;
+
+  --aj-popover: 240 10% 6%;
+  --aj-popover-foreground: 0 0% 98%;
+
+  --aj-primary: 0 0% 98%;
+  --aj-primary-foreground: 240 6% 10%;
+
+  --aj-secondary: 240 4% 16%;
+  --aj-secondary-foreground: 0 0% 98%;
+
+  --aj-muted: 240 4% 16%;
+  --aj-muted-foreground: 240 5% 65%;
+
+  --aj-accent: 240 4% 16%;
+  --aj-accent-foreground: 0 0% 98%;
+
+  --aj-destructive: 0 63% 31%;
+  --aj-destructive-foreground: 0 0% 98%;
+
+  --aj-border: 240 4% 16%;
+  --aj-input: 240 4% 16%;
+  --aj-ring: 240 5% 84%;
+}
+
 html,
 body,
 #root {
@@ -6,13 +74,8 @@ body,
   padding: 0;
   font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI',
     Roboto, sans-serif;
-  background: #f7f7f7;
-  color: #111;
-}
-
-.dark body {
-  background: #0a0a0a;
-  color: #fafafa;
+  background: hsl(var(--aj-background));
+  color: hsl(var(--aj-foreground));
 }
 
 a {
@@ -35,16 +98,12 @@ button {
   align-items: center;
   justify-content: space-between;
   padding: 12px 20px;
-  border-bottom: 1px solid #e5e5e5;
-  background: rgba(255, 255, 255, 0.9);
+  border-bottom: 1px solid hsl(var(--aj-border));
+  background: hsl(var(--aj-background) / 0.9);
   position: sticky;
   top: 0;
   z-index: 10;
-}
-
-.dark .topbar {
-  border-bottom-color: #2a2a2a;
-  background: rgba(20, 20, 20, 0.9);
+  backdrop-filter: blur(6px);
 }
 
 .brand {
@@ -59,13 +118,17 @@ button {
 
 .nav a {
   text-decoration: none;
-  color: inherit;
+  color: hsl(var(--aj-muted-foreground));
   font-size: 14px;
-  opacity: 0.7;
+  transition: color 0.15s ease;
+}
+
+.nav a:hover {
+  color: hsl(var(--aj-foreground));
 }
 
 .nav a.active {
-  opacity: 1;
+  color: hsl(var(--aj-foreground));
   font-weight: 600;
 }
 
@@ -76,25 +139,19 @@ button {
 }
 
 .btn {
-  border: 1px solid #d4d4d4;
-  background: #fff;
-  border-radius: 8px;
+  border: 1px solid hsl(var(--aj-border));
+  background: hsl(var(--aj-card));
+  color: hsl(var(--aj-card-foreground));
+  border-radius: calc(var(--aj-radius) - 2px);
   padding: 6px 12px;
   font-size: 13px;
   cursor: pointer;
+  transition: background-color 0.15s ease, color 0.15s ease;
 }
 
 .btn:hover {
-  background: #f0f0f0;
-}
-
-.dark .btn {
-  border-color: #2a2a2a;
-  background: #1a1a1a;
-}
-
-.dark .btn:hover {
-  background: #232323;
+  background: hsl(var(--aj-accent));
+  color: hsl(var(--aj-accent-foreground));
 }
 
 .page {
@@ -107,15 +164,12 @@ button {
 
 .card {
   padding: 24px;
-  background: #fff;
-  border: 1px solid #e5e5e5;
-  border-radius: 14px;
+  background: hsl(var(--aj-card));
+  color: hsl(var(--aj-card-foreground));
+  border: 1px solid hsl(var(--aj-border));
+  border-radius: var(--aj-radius);
   margin-bottom: 16px;
-}
-
-.dark .card {
-  background: #141414;
-  border-color: #262626;
+  box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
 }
 
 .order-list {
@@ -129,30 +183,27 @@ button {
   justify-content: space-between;
   align-items: center;
   padding: 12px 16px;
-  border: 1px solid #e5e5e5;
-  border-radius: 10px;
-  background: #fff;
+  border: 1px solid hsl(var(--aj-border));
+  border-radius: calc(var(--aj-radius) - 4px);
+  background: hsl(var(--aj-card));
+  color: hsl(var(--aj-card-foreground));
   cursor: pointer;
+  transition: background-color 0.15s ease, border-color 0.15s ease;
+}
+
+.order-row:hover {
+  background: hsl(var(--aj-accent) / 0.5);
 }
 
 .order-row.selected {
-  border-color: #111;
-  box-shadow: 0 0 0 1px #111;
-}
-
-.dark .order-row {
-  border-color: #2a2a2a;
-  background: #161616;
-}
-
-.dark .order-row.selected {
-  border-color: #fafafa;
-  box-shadow: 0 0 0 1px #fafafa;
+  border-color: hsl(var(--aj-primary));
+  box-shadow: 0 0 0 1px hsl(var(--aj-primary));
 }
 
 h1 {
   margin: 0 0 16px;
   font-size: 24px;
+  letter-spacing: -0.01em;
 }
 
 h2 {
@@ -163,4 +214,8 @@ h2 {
 p {
   margin: 6px 0;
   line-height: 1.55;
+}
+
+.muted {
+  color: hsl(var(--aj-muted-foreground));
 }

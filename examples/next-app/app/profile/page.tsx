@@ -42,10 +42,10 @@ export default function ProfilePage() {
   );
 
   return (
-    <div className="page">
-      <h1>Profile</h1>
-      <div className="card">
-        <h2>About you</h2>
+    <div className="mx-auto w-full max-w-3xl flex-1 px-5 py-8">
+      <h1 className="mb-4 text-2xl font-semibold tracking-tight">Profile</h1>
+      <div className="mb-4 rounded-xl border border-border bg-card p-6 text-card-foreground shadow-sm">
+        <h2 className="mb-2 text-lg font-semibold">About you</h2>
         <p>
           <strong>Name:</strong> {name}
         </p>
@@ -55,8 +55,8 @@ export default function ProfilePage() {
         <p>
           <strong>Bio:</strong> {bio}
         </p>
-        <p style={{ fontSize: 13, opacity: 0.6, marginTop: 16 }}>
-          Tip: open the chat and ask <em>"update my bio to anything you like"</em>.
+        <p className="mt-4 text-sm text-muted-foreground">
+          Tip: open the chat and ask <em>&ldquo;update my bio to anything you like&rdquo;</em>.
         </p>
       </div>
     </div>

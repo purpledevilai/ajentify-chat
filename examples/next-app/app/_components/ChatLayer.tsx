@@ -49,7 +49,6 @@ export function ChatLayer({ children }: { children: ReactNode }) {
       open={open}
       onOpenChange={setOpen}
       desktopVariant="inline"
-      autoCreateContext
       newChatView={<NewChatHero name={CURRENT_USER.firstName} />}
     >
       {children}

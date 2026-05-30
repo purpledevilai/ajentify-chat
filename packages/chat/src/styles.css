@@ -2,68 +2,76 @@
 @tailwind components;
 @tailwind utilities;
 
-@layer base {
-  :root {
-    --aj-background: 0 0% 100%;
-    --aj-foreground: 240 10% 4%;
+/*
+ * Theme tokens. Declared *outside* Tailwind's `@layer base` so the build
+ * never tree-shakes the `.dark` ruleset. Tailwind v3 with `darkMode: 'class'`
+ * will drop unused `.dark` selectors inside `@layer base` if no component
+ * uses a `dark:` utility — and chat doesn't (it relies on variable swaps),
+ * so the dark token block previously vanished from `dist/styles.css`.
+ *
+ * Consumers can override any of these on their own `:root` / `.dark` (or
+ * via `themeBridge` on `<AjentifyProvider>`) to retheme the chat live.
+ */
+:root {
+  --aj-background: 0 0% 100%;
+  --aj-foreground: 240 10% 4%;
 
-    --aj-card: 0 0% 100%;
-    --aj-card-foreground: 240 10% 4%;
+  --aj-card: 0 0% 100%;
+  --aj-card-foreground: 240 10% 4%;
 
-    --aj-popover: 0 0% 100%;
-    --aj-popover-foreground: 240 10% 4%;
+  --aj-popover: 0 0% 100%;
+  --aj-popover-foreground: 240 10% 4%;
 
-    --aj-primary: 240 6% 10%;
-    --aj-primary-foreground: 0 0% 98%;
+  --aj-primary: 240 6% 10%;
+  --aj-primary-foreground: 0 0% 98%;
 
-    --aj-secondary: 240 5% 96%;
-    --aj-secondary-foreground: 240 6% 10%;
+  --aj-secondary: 240 5% 96%;
+  --aj-secondary-foreground: 240 6% 10%;
 
-    --aj-muted: 240 5% 96%;
-    --aj-muted-foreground: 240 4% 46%;
+  --aj-muted: 240 5% 96%;
+  --aj-muted-foreground: 240 4% 46%;
 
-    --aj-accent: 240 5% 96%;
-    --aj-accent-foreground: 240 6% 10%;
+  --aj-accent: 240 5% 96%;
+  --aj-accent-foreground: 240 6% 10%;
 
-    --aj-destructive: 0 84% 60%;
-    --aj-destructive-foreground: 0 0% 98%;
+  --aj-destructive: 0 84% 60%;
+  --aj-destructive-foreground: 0 0% 98%;
 
-    --aj-border: 240 6% 90%;
-    --aj-input: 240 6% 90%;
-    --aj-ring: 240 6% 10%;
+  --aj-border: 240 6% 90%;
+  --aj-input: 240 6% 90%;
+  --aj-ring: 240 6% 10%;
 
-    --aj-radius: 0.75rem;
-  }
+  --aj-radius: 0.75rem;
+}
 
-  .dark {
-    --aj-background: 240 10% 4%;
-    --aj-foreground: 0 0% 98%;
+.dark {
+  --aj-background: 240 10% 4%;
+  --aj-foreground: 0 0% 98%;
 
-    --aj-card: 240 10% 6%;
-    --aj-card-foreground: 0 0% 98%;
+  --aj-card: 240 10% 6%;
+  --aj-card-foreground: 0 0% 98%;
 
-    --aj-popover: 240 10% 6%;
-    --aj-popover-foreground: 0 0% 98%;
+  --aj-popover: 240 10% 6%;
+  --aj-popover-foreground: 0 0% 98%;
 
-    --aj-primary: 0 0% 98%;
-    --aj-primary-foreground: 240 6% 10%;
+  --aj-primary: 0 0% 98%;
+  --aj-primary-foreground: 240 6% 10%;
 
-    --aj-secondary: 240 4% 16%;
-    --aj-secondary-foreground: 0 0% 98%;
+  --aj-secondary: 240 4% 16%;
+  --aj-secondary-foreground: 0 0% 98%;
 
-    --aj-muted: 240 4% 16%;
-    --aj-muted-foreground: 240 5% 65%;
+  --aj-muted: 240 4% 16%;
+  --aj-muted-foreground: 240 5% 65%;
 
-    --aj-accent: 240 4% 16%;
-    --aj-accent-foreground: 0 0% 98%;
+  --aj-accent: 240 4% 16%;
+  --aj-accent-foreground: 0 0% 98%;
 
-    --aj-destructive: 0 63% 31%;
-    --aj-destructive-foreground: 0 0% 98%;
+  --aj-destructive: 0 63% 31%;
+  --aj-destructive-foreground: 0 0% 98%;
 
-    --aj-border: 240 4% 16%;
-    --aj-input: 240 4% 16%;
-    --aj-ring: 240 5% 84%;
-  }
+  --aj-border: 240 4% 16%;
+  --aj-input: 240 4% 16%;
+  --aj-ring: 240 5% 84%;
 }
 
 @layer components {

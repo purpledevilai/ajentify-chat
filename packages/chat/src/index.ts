@@ -6,7 +6,9 @@ export {
   AjentifyProvider,
   type AjentifyConfig,
   type AjentifyProviderProps,
+  type AjThemeToken,
   type StorageOption,
+  type ThemeBridgeOption,
 } from './provider/AjentifyProvider';
 export { AjentifyContext } from './provider/context';
 export type { AjentifyContextValue } from './provider/context';

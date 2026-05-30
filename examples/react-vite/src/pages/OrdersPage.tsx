@@ -105,7 +105,7 @@ export function OrdersPage() {
             >
               <div>
                 <div style={{ fontWeight: 600 }}>{o.id}</div>
-                <div style={{ fontSize: 13, opacity: 0.6 }}>
+                <div className="muted" style={{ fontSize: 13 }}>
                   {o.customer} · {o.status}
                   {o.refunded ? ' · refunded' : ''}
                 </div>
@@ -122,7 +122,7 @@ export function OrdersPage() {
           <p>Total: ${selected.total.toFixed(2)}</p>
           <p>Status: {selected.status}</p>
           <p>Refunded: {selected.refunded ? 'yes' : 'no'}</p>
-          <p style={{ fontSize: 13, opacity: 0.6, marginTop: 16 }}>
+          <p className="muted" style={{ fontSize: 13, marginTop: 16 }}>
             Tip: open the chat and ask <em>"refund the selected order"</em>.
           </p>
         </div>

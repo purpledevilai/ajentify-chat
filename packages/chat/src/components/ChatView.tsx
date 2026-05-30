@@ -30,18 +30,10 @@ export interface ChatViewProps {
   /** Title override for the header. */
   title?: React.ReactNode;
   /**
-   * Auto-start a new chat on mount if there isn't one already. Defaults to
-   * false.
-   *
-   * The behavior depends on the provider's `agentSpeaksFirst` config: by
-   * default this just enters a local `'draft'` state (no backend call) so
-   * the user can start typing immediately, and the actual `create_context`
-   * runs lazily on the first send. With `agentSpeaksFirst: true` this
-   * eagerly creates and connects so the agent can stream its initial
-   * message.
+   * Custom recovery UI shown when an upstream `create_context` failed and
+   * there is no current context to render. Defaults to a "Couldn't start a
+   * new chat — Try again" affordance.
    */
-  autoCreateContext?: boolean;
-  /** Custom empty state when there is no context. */
   emptyState?: React.ReactNode;
   /**
    * Forwarded to `<ChatMessages />`. Customizes the placeholder shown while
@@ -66,13 +58,25 @@ export interface ChatViewProps {
 /**
  * A complete chat experience that fills its parent. Compose the lower-level
  * components (ChatHeader, ChatMessages, ChatInput) if you need more control.
+ *
+ * On mount (and any time `hasContext` flips back to `false`, e.g. after the
+ * active context is deleted) the view auto-calls `startNewContext()` so the
+ * user lands on a ready-to-type chat. The provider's `agentSpeaksFirst`
+ * config decides what that means:
+ *  - `false` (default): a local `'draft'` state — no backend call until the
+ *    first `sendMessage()`.
+ *  - `true`: an eager `create_context` + WebSocket connect so the agent can
+ *    stream its greeting.
+ *
+ * If the eager call fails, the view falls back to the `emptyState` slot
+ * (default: a "Couldn't start a new chat — Try again" affordance) and does
+ * not auto-retry.
  */
 export function ChatView({
   classNames,
   showHeader = true,
   onClose,
   title,
-  autoCreateContext = false,
   emptyState,
   waitingIndicator,
   newChatView,
@@ -82,20 +86,33 @@ export function ChatView({
   const { createNew } = useContextHistory();
   const [showingHistory, setShowingHistory] = React.useState(false);
   const [creating, setCreating] = React.useState(false);
+  // One-shot guard: prevents an infinite loop when an `agentSpeaksFirst`
+  // provider's `create_context` keeps rejecting (the store rolls state back
+  // to idle on failure, which would otherwise re-flip `hasContext` and
+  // re-fire this effect). Reset whenever we successfully land on a context.
+  const autoStartFailedRef = React.useRef(false);
+  if (hasContext && autoStartFailedRef.current) {
+    autoStartFailedRef.current = false;
+  }
 
   React.useEffect(() => {
-    if (!autoCreateContext) return;
-    if (hasContext) return;
-    if (creating) return;
+    if (hasContext || creating) return;
+    if (autoStartFailedRef.current) return;
     setCreating(true);
-    createNew().finally(() => setCreating(false));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [autoCreateContext, hasContext]);
+    createNew()
+      .catch(() => {
+        autoStartFailedRef.current = true;
+      })
+      .finally(() => setCreating(false));
+  }, [hasContext, creating, createNew]);
 
   const onStartChat = React.useCallback(async () => {
+    autoStartFailedRef.current = false;
     setCreating(true);
     try {
       await createNew();
+    } catch {
+      autoStartFailedRef.current = true;
     } finally {
       setCreating(false);
     }
@@ -132,20 +149,28 @@ export function ChatView({
           >
             {emptyState ?? (
               <>
-                <p>Start a new chat to begin.</p>
-                <Button
-                  onClick={() => void onStartChat()}
-                  disabled={creating || status === 'connecting'}
-                >
-                  {creating || status === 'connecting' ? (
-                    <>
-                      <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />
-                      Starting…
-                    </>
-                  ) : (
-                    'New chat'
-                  )}
-                </Button>
+                <p>
+                  {autoStartFailedRef.current
+                    ? "Couldn't start a new chat."
+                    : 'Starting a new chat…'}
+                </p>
+                {autoStartFailedRef.current ? (
+                  <Button
+                    onClick={() => void onStartChat()}
+                    disabled={creating || status === 'connecting'}
+                  >
+                    {creating || status === 'connecting' ? (
+                      <>
+                        <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />
+                        Retrying…
+                      </>
+                    ) : (
+                      'Try again'
+                    )}
+                  </Button>
+                ) : (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                )}
               </>
             )}
           </div>

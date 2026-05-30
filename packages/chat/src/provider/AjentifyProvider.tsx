@@ -56,20 +56,32 @@ export interface AjentifyConfig {
   /** Surface internal AjentifyErrors (transport, tool, callback, etc). */
   onError?: (err: AjentifyError) => void;
   /**
-   * Eagerly create + connect on `startNewContext()` so the agent can stream
-   * its first message before the user types. Defaults to `false`, in which
-   * case "+ New chat" / `autoCreateContext` only enter a local `draft`
-   * state and the actual `create_context` call is deferred until the user
-   * sends their first message. Set to `true` for agents that are
-   * configured to speak first.
+   * Eagerly create + connect on `startNewContext()` (mount, "+ new chat",
+   * "+ New chat" in history) so the agent can stream its first message
+   * before the user types. Defaults to `false`, in which case those entry
+   * points only stage a local `draft` state and the actual `create_context`
+   * call is deferred until the user sends their first message. Set to
+   * `true` for agents that are configured to speak first.
    */
   agentSpeaksFirst?: boolean;
   /**
-   * Inject the consumer's CSS variables (so chat styles pick up their shadcn
-   * theme automatically). Currently supported: `'shadcn'` which aliases
-   * `--aj-*` tokens to their `--*` counterparts.
+   * Hook the chat's `--aj-*` token contract up to the host app's own CSS
+   * variables so chat re-themes automatically (including live light/dark
+   * toggles via class swaps).
+   *
+   * - `'shadcn'`: aliases `--aj-*` to shadcn/ui's un-prefixed `--background`,
+   *   `--foreground`, `--primary`, ... (HSL channels). Picks up dark values
+   *   under `.dark` automatically.
+   * - `{ tokens, selectors? }`: map any subset of `--aj-*` tokens to your
+   *   own host variable names, e.g.
+   *   `themeBridge={{ tokens: { background: '--my-bg', primary: '--my-accent' } }}`.
+   *   Defaults to declaring under `[':root', '.dark', '[data-theme]']` so
+   *   most dark-mode strategies (class on html, `data-theme="dark"`, Radix
+   *   Themes, etc.) work out of the box.
+   *
+   * Omit this if you'd rather override `--aj-*` directly in your stylesheet.
    */
-  themeBridge?: 'shadcn';
+  themeBridge?: ThemeBridgeOption;
   /** Inject WebSocket implementation. Useful for Node/tests. */
   WebSocketImpl?: typeof WebSocket;
 }
@@ -78,6 +90,78 @@ export interface AjentifyProviderProps {
   config: AjentifyConfig;
   children: ReactNode;
 }
+
+/**
+ * The set of theme tokens the chat understands. Names line up 1:1 with the
+ * `--aj-*` CSS variables in `styles.css`.
+ */
+export type AjThemeToken =
+  | 'background'
+  | 'foreground'
+  | 'card'
+  | 'card-foreground'
+  | 'popover'
+  | 'popover-foreground'
+  | 'primary'
+  | 'primary-foreground'
+  | 'secondary'
+  | 'secondary-foreground'
+  | 'muted'
+  | 'muted-foreground'
+  | 'accent'
+  | 'accent-foreground'
+  | 'destructive'
+  | 'destructive-foreground'
+  | 'border'
+  | 'input'
+  | 'ring'
+  | 'radius';
+
+export type ThemeBridgeOption =
+  | 'shadcn'
+  | {
+      /**
+       * Map of `--aj-*` token names (without the `--aj-` prefix) to host CSS
+       * variable names (with the leading `--`). Any token you omit keeps its
+       * built-in default.
+       */
+      tokens: Partial<Record<AjThemeToken, string>>;
+      /**
+       * CSS selectors to declare the alias block under. Defaults to
+       * `[':root', '.dark', '[data-theme]']` so light/dark/data-theme
+       * strategies all work without extra config.
+       *
+       * CSS variables resolve at the *declaring* selector's scope, so
+       * declaring under `.dark` (and `[data-theme]`) is what makes dark-mode
+       * host variables actually reach `--aj-*`.
+       */
+      selectors?: string[];
+    };
+
+const SHADCN_TOKEN_MAP: Record<AjThemeToken, string> = {
+  background: '--background',
+  foreground: '--foreground',
+  card: '--card',
+  'card-foreground': '--card-foreground',
+  popover: '--popover',
+  'popover-foreground': '--popover-foreground',
+  primary: '--primary',
+  'primary-foreground': '--primary-foreground',
+  secondary: '--secondary',
+  'secondary-foreground': '--secondary-foreground',
+  muted: '--muted',
+  'muted-foreground': '--muted-foreground',
+  accent: '--accent',
+  'accent-foreground': '--accent-foreground',
+  destructive: '--destructive',
+  'destructive-foreground': '--destructive-foreground',
+  border: '--border',
+  input: '--input',
+  ring: '--ring',
+  radius: '--radius',
+};
+
+const DEFAULT_BRIDGE_SELECTORS = [':root', '.dark', '[data-theme]'];
 
 function resolveStorage(option: StorageOption | undefined): Storage | null {
   if (option === null) return null;
@@ -154,47 +238,60 @@ export function AjentifyProvider({ config, children }: AjentifyProviderProps): J
 
   return (
     <AjentifyContext.Provider value={value}>
-      {config.themeBridge === 'shadcn' ? <ShadcnThemeBridge /> : null}
+      {config.themeBridge ? <ThemeBridge bridge={config.themeBridge} /> : null}
       {children}
     </AjentifyContext.Provider>
   );
 }
 
 /**
- * Injects a tiny style block aliasing `--aj-*` tokens to a consuming app's
- * shadcn `--*` tokens. Only renders on the client (the provider itself is
- * `"use client"`).
+ * Builds the `--aj-*: var(--host, var(--aj-*))` alias declarations that map
+ * a host's CSS variables onto the chat's token contract.
  */
-function ShadcnThemeBridge(): JSX.Element {
+function buildAliasDeclarations(
+  tokens: Partial<Record<AjThemeToken, string>>
+): string {
+  return (Object.keys(tokens) as AjThemeToken[])
+    .map((token) => {
+      const hostVar = tokens[token];
+      if (!hostVar) return '';
+      return `--aj-${token}: var(${hostVar}, var(--aj-${token}));`;
+    })
+    .filter(Boolean)
+    .join('\n          ');
+}
+
+/**
+ * Injects a `<style>` block aliasing the chat's `--aj-*` tokens to the
+ * host's CSS variables. We declare the same block under several selectors
+ * (`:root`, `.dark`, `[data-theme]` by default) because CSS custom property
+ * `var()` references resolve at the *declaring* selector's scope — without
+ * a `.dark` declaration, dark-mode host values never propagate to chat.
+ */
+function ThemeBridge({ bridge }: { bridge: ThemeBridgeOption }): JSX.Element {
+  const tokens =
+    bridge === 'shadcn' ? SHADCN_TOKEN_MAP : bridge.tokens;
+  const selectors =
+    bridge === 'shadcn'
+      ? DEFAULT_BRIDGE_SELECTORS
+      : bridge.selectors ?? DEFAULT_BRIDGE_SELECTORS;
+
+  const declarations = buildAliasDeclarations(tokens);
+  if (!declarations) return <></>;
+
+  const css = selectors
+    .map(
+      (selector) => `${selector} {
+          ${declarations}
+        }`
+    )
+    .join('\n        ');
+
   return (
     <style
-      // The chat uses HSL channels (e.g. "240 10% 4%") so shadcn maps 1:1.
-      dangerouslySetInnerHTML={{
-        __html: `
-        :root {
-          --aj-background: var(--background, var(--aj-background));
-          --aj-foreground: var(--foreground, var(--aj-foreground));
-          --aj-card: var(--card, var(--aj-card));
-          --aj-card-foreground: var(--card-foreground, var(--aj-card-foreground));
-          --aj-popover: var(--popover, var(--aj-popover));
-          --aj-popover-foreground: var(--popover-foreground, var(--aj-popover-foreground));
-          --aj-primary: var(--primary, var(--aj-primary));
-          --aj-primary-foreground: var(--primary-foreground, var(--aj-primary-foreground));
-          --aj-secondary: var(--secondary, var(--aj-secondary));
-          --aj-secondary-foreground: var(--secondary-foreground, var(--aj-secondary-foreground));
-          --aj-muted: var(--muted, var(--aj-muted));
-          --aj-muted-foreground: var(--muted-foreground, var(--aj-muted-foreground));
-          --aj-accent: var(--accent, var(--aj-accent));
-          --aj-accent-foreground: var(--accent-foreground, var(--aj-accent-foreground));
-          --aj-destructive: var(--destructive, var(--aj-destructive));
-          --aj-destructive-foreground: var(--destructive-foreground, var(--aj-destructive-foreground));
-          --aj-border: var(--border, var(--aj-border));
-          --aj-input: var(--input, var(--aj-input));
-          --aj-ring: var(--ring, var(--aj-ring));
-          --aj-radius: var(--radius, var(--aj-radius));
-        }
-      `,
-      }}
+      // Chat tokens are HSL channels (e.g. "240 10% 4%") to allow `/<alpha>`
+      // utilities — host vars must use the same format for shadcn-style maps.
+      dangerouslySetInnerHTML={{ __html: `\n        ${css}\n      ` }}
     />
   );
 }

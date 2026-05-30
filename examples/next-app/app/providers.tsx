@@ -56,6 +56,10 @@ export function Providers({ children }: { children: ReactNode }) {
         config={{
           onAjentifyEvent: ajentifyEvent,
           clientSideTools,
+          // Hand the chat the host app's shadcn-style design tokens so the
+          // panel and the surrounding chrome stay in lockstep — including
+          // when `next-themes` flips `class="dark"` on <html>.
+          themeBridge: 'shadcn',
           onError: (err) => {
             console.error('[ajentify]', err);
           },

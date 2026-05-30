@@ -62,10 +62,10 @@ export interface CurrentContextStore {
    */
   creating: boolean;
   /**
-   * True when the user has expressed interest in a new chat ("+", history's
-   * "+ New chat", or `autoCreateContext` on mount) but no `create_context`
-   * call has been dispatched yet. The first `sendMessage()` materializes
-   * the draft into a real context.
+   * True when the user has expressed interest in a new chat (clicked "+",
+   * mounted `<ChatView />` on a fresh session, or hit "+ New chat" in the
+   * history view) but no `create_context` call has been dispatched yet.
+   * The first `sendMessage()` materializes the draft into a real context.
    */
   isDraft: boolean;
   /**

@@ -53,7 +53,7 @@ export function ProfilePage() {
         <p>
           <strong>Bio:</strong> {bio}
         </p>
-        <p style={{ fontSize: 13, opacity: 0.6, marginTop: 16 }}>
+        <p className="muted" style={{ fontSize: 13, marginTop: 16 }}>
           Tip: open the chat and ask <em>"update my bio to anything you like"</em>.
         </p>
       </div>

@@ -16,7 +16,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="en" suppressHydrationWarning>
       <body>
         <Providers>
-          <div className="app">
+          <div className="flex h-screen min-h-0 flex-col">
             <TopBar />
             <ChatLayer>{children}</ChatLayer>
           </div>

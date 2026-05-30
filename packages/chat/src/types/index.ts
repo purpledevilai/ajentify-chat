@@ -115,10 +115,10 @@ export type ConnectionStatus =
   | 'idle'
   /**
    * The user has expressed interest in a new chat (clicked "+", mounted the
-   * panel with `autoCreateContext`, etc.) but no `create_context` request has
+   * panel on a fresh session, etc.) but no `create_context` request has
    * been sent yet. The first `sendMessage()` call materializes the draft
    * into a real backend context. Distinct from `idle` so the UI can render
-   * an empty conversation rather than the "Start a new chat" empty state.
+   * an empty conversation rather than an error / empty state.
    */
   | 'draft'
   | 'connecting'

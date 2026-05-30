@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Link, NavLink, Route, Routes, useNavigate } from 'react-router-dom';
 import { AjentifyProvider } from '@ajentify/chat';
 import { ChatPanel } from '@ajentify/chat/ui';
@@ -11,6 +11,14 @@ export default function App() {
   const [chatOpen, setChatOpen] = useState(false);
   const [dark, setDark] = useState(false);
   const navigate = useNavigate();
+
+  // Toggle the `dark` class on <html> so the same selector strategy used by
+  // the chat package (`.dark { --aj-* }`) and our own page chrome works
+  // everywhere. Putting it on a div would only affect descendants and would
+  // miss e.g. `body { background: ... }` in our stylesheet.
+  useEffect(() => {
+    document.documentElement.classList.toggle('dark', dark);
+  }, [dark]);
 
   // Catch-all for client-side tools. We route the built-in `navigate` tool
   // through React Router's `useNavigate` so the agent can move the user
@@ -43,7 +51,7 @@ export default function App() {
         },
       }}
     >
-      <div className={`app ${dark ? 'dark' : ''}`}>
+      <div className="app">
         <div className="topbar">
           <div className="brand">
             <Link to="/" style={{ textDecoration: 'none', color: 'inherit' }}>
@@ -75,7 +83,6 @@ export default function App() {
           open={chatOpen}
           onOpenChange={setChatOpen}
           desktopVariant="inline"
-          autoCreateContext
         >
           <Routes>
             <Route path="/" element={<HomePage />} />

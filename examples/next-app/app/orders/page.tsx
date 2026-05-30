@@ -78,49 +78,70 @@ export default function OrdersPage() {
   }, [orders]);
 
   return (
-    <div className="page">
-      <h1>Orders</h1>
-      <div className="card">
-        <h2>Status</h2>
-        <p>
+    <div className="mx-auto w-full max-w-3xl flex-1 px-5 py-8">
+      <h1 className="mb-4 text-2xl font-semibold tracking-tight">Orders</h1>
+      <Card>
+        <CardTitle>Status</CardTitle>
+        <p className="text-muted-foreground">
           {Object.entries(totalsByStatus)
             .map(([s, n]) => `${n} ${s}`)
             .join(' · ')}
         </p>
-      </div>
-      <div className="card">
-        <h2>All orders</h2>
-        <div className="order-list">
-          {orders.map((o) => (
-            <div
-              key={o.id}
-              className={`order-row${o.id === selectedId ? ' selected' : ''}`}
-              onClick={() => setSelectedId(o.id)}
-            >
-              <div>
-                <div style={{ fontWeight: 600 }}>{o.id}</div>
-                <div style={{ fontSize: 13, opacity: 0.6 }}>
-                  {o.customer} · {o.status}
-                  {o.refunded ? ' · refunded' : ''}
+      </Card>
+      <Card>
+        <CardTitle>All orders</CardTitle>
+        <div className="flex flex-col gap-2">
+          {orders.map((o) => {
+            const isSelected = o.id === selectedId;
+            return (
+              <button
+                key={o.id}
+                type="button"
+                onClick={() => setSelectedId(o.id)}
+                className={
+                  'flex items-center justify-between rounded-lg border px-4 py-3 text-left transition-colors ' +
+                  (isSelected
+                    ? 'border-primary ring-1 ring-primary'
+                    : 'border-border hover:bg-accent/50')
+                }
+              >
+                <div>
+                  <div className="font-semibold">{o.id}</div>
+                  <div className="text-xs text-muted-foreground">
+                    {o.customer} · {o.status}
+                    {o.refunded ? ' · refunded' : ''}
+                  </div>
                 </div>
-              </div>
-              <div style={{ fontWeight: 600 }}>${o.total.toFixed(2)}</div>
-            </div>
-          ))}
+                <div className="font-semibold">${o.total.toFixed(2)}</div>
+              </button>
+            );
+          })}
         </div>
-      </div>
+      </Card>
       {selected ? (
-        <div className="card">
-          <h2>Selected: {selected.id}</h2>
+        <Card>
+          <CardTitle>Selected: {selected.id}</CardTitle>
           <p>Customer: {selected.customer}</p>
           <p>Total: ${selected.total.toFixed(2)}</p>
           <p>Status: {selected.status}</p>
           <p>Refunded: {selected.refunded ? 'yes' : 'no'}</p>
-          <p style={{ fontSize: 13, opacity: 0.6, marginTop: 16 }}>
-            Tip: open the chat and ask <em>"refund the selected order"</em>.
+          <p className="mt-4 text-sm text-muted-foreground">
+            Tip: open the chat and ask <em>&ldquo;refund the selected order&rdquo;</em>.
           </p>
-        </div>
+        </Card>
       ) : null}
     </div>
   );
+}
+
+function Card({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="mb-4 rounded-xl border border-border bg-card p-6 text-card-foreground shadow-sm">
+      {children}
+    </div>
+  );
+}
+
+function CardTitle({ children }: { children: React.ReactNode }) {
+  return <h2 className="mb-2 text-lg font-semibold">{children}</h2>;
 }
