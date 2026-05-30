@@ -1,6 +1,6 @@
 {
   "name": "@ajentify/chat",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "React chat component and headless logic layer for the Ajentify token streaming server",
   "license": "MIT",
   "type": "module",
@@ -10,7 +10,8 @@
   "types": "./dist/index.d.ts",
   "files": [
     "dist",
-    "README.md"
+    "README.md",
+    "LICENSE"
   ],
   "exports": {
     ".": {
