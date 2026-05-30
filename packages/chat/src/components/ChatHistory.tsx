@@ -17,7 +17,15 @@ export interface ChatHistoryClassNames {
 export interface ChatHistoryProps {
   /** Called when the user wants to leave the history view. */
   onBack?: () => void;
-  /** Auto-load history on mount. Defaults to true. */
+  /**
+   * Auto-load history on mount. Defaults to true.
+   *
+   * Each mount kicks off a fresh `get_context_history` fetch in the
+   * background. If we already have a cached list it keeps rendering during
+   * the round-trip (so opening the panel feels instant) and the rows
+   * update in place when the refresh resolves. Only the very first load —
+   * when there's nothing cached yet — shows the "Loading…" placeholder.
+   */
   autoLoad?: boolean;
   /**
    * Show a per-row delete button that dispatches a `delete_context` event.
@@ -54,7 +62,7 @@ export function ChatHistory({
     loading,
     error,
     loaded,
-    ensureLoaded,
+    load,
     switchTo,
     createNew,
     deleteContext,
@@ -64,7 +72,15 @@ export function ChatHistory({
   const [deletingId, setDeletingId] = React.useState<string | null>(null);
 
   React.useEffect(() => {
-    if (autoLoad) void ensureLoaded();
+    if (!autoLoad) return;
+    // Always trigger a refetch when the panel mounts. The cached list (if
+    // any) keeps rendering during the round-trip — see the JSDoc on
+    // `autoLoad` and the `loading && !loaded` gate below — so opening the
+    // history view feels instant while still surfacing freshly-created or
+    // server-side changes.
+    void load().catch(() => {
+      // Failures land on `historyError`; the cached rows stay rendered.
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoLoad]);
 
