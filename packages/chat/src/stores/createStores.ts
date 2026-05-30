@@ -21,6 +21,7 @@ export interface CreateStoresOptions {
   requestTimeoutMs?: CurrentContextStoreOptions['requestTimeoutMs'];
   onEvents?: CurrentContextStoreOptions['onEvents'];
   onError?: CurrentContextStoreOptions['onError'];
+  agentSpeaksFirst?: CurrentContextStoreOptions['agentSpeaksFirst'];
 }
 
 /**
@@ -44,6 +45,7 @@ export function createStores(options: CreateStoresOptions): AjentifyStores {
     requestTimeoutMs: options.requestTimeoutMs,
     onEvents: options.onEvents,
     onError: options.onError,
+    agentSpeaksFirst: options.agentSpeaksFirst,
   });
   return { currentContext, contexts, clientSideTools };
 }

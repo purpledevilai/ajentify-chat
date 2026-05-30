@@ -29,7 +29,17 @@ export interface ChatViewProps {
   onClose?: () => void;
   /** Title override for the header. */
   title?: React.ReactNode;
-  /** Auto-create a context on mount if none is set. Defaults to false. */
+  /**
+   * Auto-start a new chat on mount if there isn't one already. Defaults to
+   * false.
+   *
+   * The behavior depends on the provider's `agentSpeaksFirst` config: by
+   * default this just enters a local `'draft'` state (no backend call) so
+   * the user can start typing immediately, and the actual `create_context`
+   * runs lazily on the first send. With `agentSpeaksFirst: true` this
+   * eagerly creates and connects so the agent can stream its initial
+   * message.
+   */
   autoCreateContext?: boolean;
   /** Custom empty state when there is no context. */
   emptyState?: React.ReactNode;

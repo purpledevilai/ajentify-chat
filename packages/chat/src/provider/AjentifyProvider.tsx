@@ -56,6 +56,15 @@ export interface AjentifyConfig {
   /** Surface internal AjentifyErrors (transport, tool, callback, etc). */
   onError?: (err: AjentifyError) => void;
   /**
+   * Eagerly create + connect on `startNewContext()` so the agent can stream
+   * its first message before the user types. Defaults to `false`, in which
+   * case "+ New chat" / `autoCreateContext` only enter a local `draft`
+   * state and the actual `create_context` call is deferred until the user
+   * sends their first message. Set to `true` for agents that are
+   * configured to speak first.
+   */
+  agentSpeaksFirst?: boolean;
+  /**
    * Inject the consumer's CSS variables (so chat styles pick up their shadcn
    * theme automatically). Currently supported: `'shadcn'` which aliases
    * `--aj-*` tokens to their `--*` counterparts.
@@ -123,6 +132,7 @@ export function AjentifyProvider({ config, children }: AjentifyProviderProps): J
       requestTimeoutMs: config.requestTimeoutMs,
       onEvents: (...args) => configRef.current.onEvents?.(...args),
       onError: (err) => configRef.current.onError?.(err),
+      agentSpeaksFirst: config.agentSpeaksFirst,
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);

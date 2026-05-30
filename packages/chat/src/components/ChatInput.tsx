@@ -48,6 +48,9 @@ export function ChatInput({
 
   const streaming = status === 'streaming' || status === 'awaiting_tool_responses';
   const connecting = status === 'connecting';
+  // `status === 'draft'` deliberately falls through to "enabled" — drafts
+  // are the no-backend-yet placeholder users see before sending their first
+  // message; the send action itself triggers create_context + connect.
   const sendBlocked = (disableWhileStreaming && streaming) || connecting;
 
   const resize = React.useCallback(() => {

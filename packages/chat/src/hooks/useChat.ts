@@ -12,16 +12,33 @@ export interface UseChatResult {
   pendingResponse: { responseId: string; text: string } | null;
   status: ConnectionStatus;
   agent: Agent | null;
-  /** True when there is no active context yet. */
+  /**
+   * True when there is an active context, a draft, or a creation request in
+   * flight. Lets the UI render an empty conversation the moment the user
+   * asks for a new chat, even if the backend `create_context` call is
+   * deferred until the first message.
+   */
   hasContext: boolean;
   error: string | null;
+  /**
+   * True when the user is in a deferred draft chat — they've asked for a
+   * new conversation but no `create_context` request has been dispatched
+   * yet. The first send will materialize it.
+   */
+  isDraft: boolean;
+  /**
+   * True between `useContextHistory().createNew()` (or the first send on a
+   * draft) and the resulting WebSocket being connected. Useful for showing
+   * a subtle "Starting new chat…" affordance.
+   */
+  isPreparingNewChat: boolean;
   /**
    * True between sending a message (or returning client-side tool responses)
    * and the first streamed token of the agent's reply. UI can show a generic
    * placeholder ("Thinking…", "Working…", a spinner, etc.) during this window.
    */
   isWaitingForResponse: boolean;
-  /** Send a human message. No-op when not connected. */
+  /** Send a human message. Materializes a draft if needed before sending. */
   send: (text: string) => Promise<void>;
   /** Disconnect the WebSocket but keep the messages. */
   disconnect: () => void;
@@ -40,6 +57,8 @@ export function useChat(): UseChatResult {
   const agent = useStore(stores.currentContext, (s) => s.agent);
   const contextId = useStore(stores.currentContext, (s) => s.contextId);
   const error = useStore(stores.currentContext, (s) => s.error);
+  const creating = useStore(stores.currentContext, (s) => s.creating);
+  const isDraft = useStore(stores.currentContext, (s) => s.isDraft);
 
   const send = useCallback(
     (text: string) => stores.currentContext.getState().sendMessage(text),
@@ -50,17 +69,30 @@ export function useChat(): UseChatResult {
     [stores]
   );
 
+  // Show the waiting indicator any time the user has sent a message but
+  // hasn't seen any of the agent's reply yet. Includes the brief
+  // 'connecting' window during draft materialization (createContext +
+  // WebSocket handshake) so the bubble doesn't flicker between send and
+  // first token.
+  const lastMessage = messages[messages.length - 1];
+  const lastIsHuman =
+    lastMessage?.kind === 'text' && lastMessage.sender === 'human';
   const isWaitingForResponse =
-    (status === 'streaming' || status === 'awaiting_tool_responses') &&
-    !pendingResponse;
+    !pendingResponse &&
+    (status === 'streaming' ||
+      status === 'awaiting_tool_responses' ||
+      (status === 'connecting' && lastIsHuman) ||
+      (creating && lastIsHuman));
 
   return {
     messages,
     pendingResponse,
     status,
     agent,
-    hasContext: Boolean(contextId),
+    hasContext: Boolean(contextId) || creating || isDraft,
     error,
+    isDraft,
+    isPreparingNewChat: creating || isDraft,
     isWaitingForResponse,
     send,
     disconnect,

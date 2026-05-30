@@ -29,10 +29,15 @@ export interface UseContextHistoryResult {
    */
   switchTo: (contextId: string) => Promise<void>;
   /**
-   * Create a brand new context via the dev's createContext callback and
-   * connect to it. Returns the new context id.
+   * Start a brand new chat. By default this only initializes a local
+   * `'draft'` state in the current context store — no `create_context`
+   * request is dispatched until the user sends their first message.
+   *
+   * If the provider is configured with `agentSpeaksFirst: true`, this
+   * eagerly calls `create_context` and connects the WebSocket. Idempotent:
+   * spamming the "+" button on an already-fresh chat is a no-op.
    */
-  createNew: (req?: CreateContextRequest) => Promise<string>;
+  createNew: (req?: CreateContextRequest) => Promise<void>;
   /** Clear the active context locally and disconnect. */
   clearCurrent: () => void;
   /**
@@ -78,14 +83,13 @@ export function useContextHistory(): UseContextHistoryResult {
   );
 
   const createNew = useCallback(
-    async (req?: CreateContextRequest) => {
-      const created = await stores.contexts.getState().createContext(req);
-      stores.currentContext.getState().clear();
-      await stores.currentContext.getState().connect(created.context_id);
-      if (created.messages?.length) {
-        stores.currentContext.getState().hydrateMessages(created.messages);
-      }
-      return created.context_id;
+    async (req?: CreateContextRequest): Promise<void> => {
+      // The store handles all the nuance: idempotency for spam-clicks,
+      // eager vs. draft (deferred) creation based on the provider's
+      // `agentSpeaksFirst` config, WebSocket teardown, and rollback on
+      // failure. Custom UIs that don't use this hook get the same
+      // behavior by calling `currentContext.startNewContext()` directly.
+      await stores.currentContext.getState().startNewContext(req);
     },
     [stores]
   );
