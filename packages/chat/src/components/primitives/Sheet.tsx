@@ -15,10 +15,7 @@ export const SheetOverlay = React.forwardRef<
 >(({ className, ...props }, ref) => (
   <DialogPrimitive.Overlay
     ref={ref}
-    className={cn(
-      'fixed inset-0 z-40 bg-black/40 backdrop-blur-sm animate-aj-fade-in data-[state=closed]:opacity-0',
-      className
-    )}
+    className={cn('aj-sheet-overlay', className)}
     {...props}
   />
 ));
@@ -31,6 +28,8 @@ export interface SheetContentProps
   modal?: boolean;
   /** Optional inline style for width. */
   widthPx?: number;
+  /** True on mobile breakpoints (forces full-width). */
+  isMobile?: boolean;
 }
 
 export const SheetContent = React.forwardRef<
@@ -38,7 +37,16 @@ export const SheetContent = React.forwardRef<
   SheetContentProps
 >(
   (
-    { side = 'right', className, children, modal = true, widthPx, style, ...props },
+    {
+      side = 'right',
+      className,
+      children,
+      modal = true,
+      widthPx,
+      isMobile,
+      style,
+      ...props
+    },
     ref
   ) => (
     <SheetPortal>
@@ -46,15 +54,12 @@ export const SheetContent = React.forwardRef<
       <DialogPrimitive.Content
         ref={ref}
         className={cn(
-          'fixed z-50 flex flex-col bg-background shadow-lg border border-border outline-none',
-          side === 'right' &&
-            'inset-y-0 right-0 h-full data-[state=open]:animate-aj-slide-in-right data-[state=closed]:animate-aj-slide-out-right',
-          side === 'left' && 'inset-y-0 left-0 h-full',
-          side === 'top' && 'inset-x-0 top-0',
-          side === 'bottom' && 'inset-x-0 bottom-0',
-          className
+          'aj-sheet-content',
+          `aj-sheet-content--${side}`,
+          isMobile && 'aj-sheet-content--mobile',
+          className,
         )}
-        style={widthPx ? { width: widthPx, ...style } : style}
+        style={widthPx && !isMobile ? { width: widthPx, ...style } : style}
         {...props}
       >
         {children}

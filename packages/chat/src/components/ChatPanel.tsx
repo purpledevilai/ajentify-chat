@@ -5,6 +5,7 @@ import * as DialogPrimitive from '@radix-ui/react-dialog';
 import { cn } from '../lib/utils';
 import { Sheet, SheetContent } from './primitives/Sheet';
 import { ChatView, type ChatViewClassNames, type ChatViewProps } from './ChatView';
+import { useChatPanel } from '../hooks/useChatPanel';
 
 const WIDTH_STORAGE_KEY = 'ajentify.chat.panel.width';
 
@@ -23,11 +24,16 @@ export interface ChatPanelClassNames {
 }
 
 export interface ChatPanelProps extends Omit<ChatViewProps, 'classNames' | 'onClose'> {
-  /** Controlled open state. */
+  /**
+   * Controlled open state. When omitted (the v0.2 default), the panel reads
+   * `useChatPanel().open` from the provider so any external trigger
+   * (`<ChatToggleButton />`, custom button calling `useChatPanel().toggle()`,
+   * keyboard shortcut, etc.) can toggle it without prop plumbing.
+   */
   open?: boolean;
-  /** Controlled change handler. */
+  /** Controlled change handler. Pairs with `open`. */
   onOpenChange?: (open: boolean) => void;
-  /** Uncontrolled initial state. */
+  /** Uncontrolled initial state. Ignored when the provider's panel store is in use. */
   defaultOpen?: boolean;
   /** Min width in px on desktop. Defaults to 320. */
   minWidthPx?: number;
@@ -84,15 +90,20 @@ function useMediaQuery(query: string): boolean {
  * top of `children`. On mobile it always falls back to a full-screen Sheet.
  *
  * ```tsx
- * <ChatPanel open={open} onOpenChange={setOpen} desktopVariant="inline">
+ * <ChatPanel desktopVariant="inline">
  *   <Routes>...</Routes>
  * </ChatPanel>
  * ```
+ *
+ * Open/close state is owned by the provider's built-in panel store, so any
+ * button anywhere in the tree can call `useChatPanel().toggle()` to open it.
+ * Pass `open` / `onOpenChange` to override and run it as a controlled
+ * component instead.
  */
 export function ChatPanel({
   open: controlledOpen,
   onOpenChange,
-  defaultOpen = false,
+  defaultOpen,
   minWidthPx = 320,
   maxWidthPx = 720,
   defaultWidthPx = 420,
@@ -103,16 +114,29 @@ export function ChatPanel({
   children,
   ...viewProps
 }: ChatPanelProps): JSX.Element {
+  const { open: storeOpen, setOpen: storeSetOpen } = useChatPanel();
   const isControlled = controlledOpen !== undefined;
-  const [uncontrolledOpen, setUncontrolledOpen] = React.useState(defaultOpen);
-  const open = isControlled ? !!controlledOpen : uncontrolledOpen;
+  const open = isControlled ? !!controlledOpen : storeOpen;
   const setOpen = React.useCallback(
     (next: boolean) => {
-      if (!isControlled) setUncontrolledOpen(next);
+      if (!isControlled) storeSetOpen(next);
       onOpenChange?.(next);
     },
-    [isControlled, onOpenChange]
+    [isControlled, onOpenChange, storeSetOpen]
   );
+
+  // Honor `defaultOpen` on first mount when the consumer is using the
+  // built-in store (i.e. uncontrolled). We do this once so the panel can
+  // start open on certain pages without forcing controlled mode.
+  const didApplyDefaultRef = React.useRef(false);
+  React.useEffect(() => {
+    if (didApplyDefaultRef.current) return;
+    didApplyDefaultRef.current = true;
+    if (!isControlled && defaultOpen && !storeOpen) {
+      storeSetOpen(true);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const isMobile = useMediaQuery(`(max-width: ${mobileBreakpointPx - 1}px)`);
 
@@ -180,28 +204,26 @@ export function ChatPanel({
     [persistWidth, width]
   );
 
-  // Modal Sheet on desktop or full-screen Sheet on mobile. Used for both the
-  // explicit `modal` desktop variant and any mobile breakpoint.
+  // Modal Sheet on desktop or full-screen Sheet on mobile.
   const sheet = (
     <Sheet open={open} onOpenChange={setOpen}>
       <SheetContent
         side="right"
-        className={cn(
-          'p-0 border-l',
-          isMobile ? 'w-full max-w-full' : '',
-          isMobile ? classNames?.mobileSheet : classNames?.panel
-        )}
+        isMobile={isMobile}
         widthPx={isMobile ? undefined : width}
+        className={cn(
+          isMobile ? classNames?.mobileSheet : classNames?.panel,
+        )}
       >
         {/*
           Radix Dialog requires a Title + Description for screen readers.
           The visible <ChatHeader /> already shows the agent name, so we
           render the accessibility-only nodes here as sr-only siblings.
         */}
-        <DialogPrimitive.Title className="sr-only">
+        <DialogPrimitive.Title className="aj-sr-only">
           {viewProps.title ? String(viewProps.title) : 'Assistant chat'}
         </DialogPrimitive.Title>
-        <DialogPrimitive.Description className="sr-only">
+        <DialogPrimitive.Description className="aj-sr-only">
           Conversation panel
         </DialogPrimitive.Description>
         {!isMobile && !disableResize ? (
@@ -209,10 +231,7 @@ export function ChatPanel({
             onPointerDown={onPointerDown}
             onPointerMove={onPointerMove}
             onPointerUp={onPointerUp}
-            className={cn(
-              'absolute left-0 top-0 z-10 h-full w-1.5 cursor-ew-resize select-none bg-transparent hover:bg-border/60 transition-colors',
-              classNames?.handle
-            )}
+            className={cn('aj-panel-handle', classNames?.handle)}
           />
         ) : null}
         <ChatView
@@ -239,26 +258,11 @@ export function ChatPanel({
   // flex row that fills its parent. The children area gets `flex-1` so it
   // shrinks/expands as the chat is resized.
   return (
-    <div
-      className={cn(
-        'aj-root flex min-h-0 flex-1 flex-row',
-        classNames?.root
-      )}
-    >
-      <div
-        className={cn(
-          'flex min-w-0 flex-1 flex-col overflow-auto',
-          classNames?.body
-        )}
-      >
-        {children}
-      </div>
+    <div className={cn('aj-root', 'aj-panel-host', classNames?.root)}>
+      <div className={cn('aj-panel-host-body', classNames?.body)}>{children}</div>
       {open ? (
         <div
-          className={cn(
-            'relative flex h-full shrink-0 flex-col self-stretch border-l border-border bg-background animate-aj-slide-in-right',
-            classNames?.panel
-          )}
+          className={cn('aj-panel-chat', classNames?.panel)}
           style={{ width }}
         >
           {!disableResize ? (
@@ -266,10 +270,7 @@ export function ChatPanel({
               onPointerDown={onPointerDown}
               onPointerMove={onPointerMove}
               onPointerUp={onPointerUp}
-              className={cn(
-                'absolute left-0 top-0 z-10 h-full w-1.5 -translate-x-1/2 cursor-ew-resize select-none bg-transparent hover:bg-border/60 transition-colors',
-                classNames?.handle
-              )}
+              className={cn('aj-panel-handle', classNames?.handle)}
             />
           ) : null}
           <ChatView

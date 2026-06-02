@@ -23,9 +23,18 @@ export {
 } from './components/ChatHistory';
 export { Message, type MessageProps, type MessageClassNames } from './components/Message';
 export { TypingText, type TypingTextProps } from './components/TypingText';
+export {
+  ChatToggleButton,
+  type ChatToggleButtonProps,
+} from './components/ChatToggleButton';
 
 // Primitives (re-exported for advanced composition)
-export { Button, type ButtonProps } from './components/primitives/Button';
+export {
+  Button,
+  type ButtonProps,
+  type ButtonVariant,
+  type ButtonSize,
+} from './components/primitives/Button';
 export { IconButton, type IconButtonProps } from './components/primitives/IconButton';
 export { Textarea, type TextareaProps } from './components/primitives/Textarea';
 export { ScrollArea } from './components/primitives/ScrollArea';

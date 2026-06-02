@@ -1,8 +1,15 @@
 import { type ClassValue, clsx } from 'clsx';
-import { twMerge } from 'tailwind-merge';
 
+/**
+ * Class-name combiner.
+ *
+ * v0.2: the chat is no longer Tailwind-based, so we don't need `tailwind-merge`
+ * to dedupe conflicting utilities. Plain `clsx` is enough — overrides win by
+ * being later in the className string and by CSS specificity (overrides land
+ * in the host's stylesheet, while the chat's own `.aj-*` classes are flat).
+ */
 export function cn(...inputs: ClassValue[]): string {
-  return twMerge(clsx(inputs));
+  return clsx(inputs);
 }
 
 /**

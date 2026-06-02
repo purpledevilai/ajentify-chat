@@ -6,9 +6,15 @@ import {
   createContextsStore,
   type ContextsStoreOptions,
 } from './contextsStore';
-import { createClientSideToolsStore } from './clientSideToolsStore';
+import {
+  createClientSideToolsStore,
+  type OnToolCallCallback,
+} from './clientSideToolsStore';
+import { createPanelStore } from './panelStore';
 import type { AjentifyStores } from './types';
 import type { AjentifyEventHandler } from '../types';
+
+export type { OnToolCallCallback };
 
 export interface CreateStoresOptions {
   /** Single dispatcher routing every backend request through one handler. */
@@ -22,10 +28,14 @@ export interface CreateStoresOptions {
   onEvents?: CurrentContextStoreOptions['onEvents'];
   onError?: CurrentContextStoreOptions['onError'];
   agentSpeaksFirst?: CurrentContextStoreOptions['agentSpeaksFirst'];
+  /** Analytics hook: fired for every client-side tool dispatch. */
+  onToolCall?: OnToolCallCallback;
+  /** Initial open/closed state for the panel store. Defaults to false. */
+  panelDefaultOpen?: boolean;
 }
 
 /**
- * Build the three stores for a single Provider instance. The three stores
+ * Build the four stores for a single Provider instance. The stores
  * reference each other internally (current → contexts for tokens, current →
  * clientSideTools for tool dispatch).
  */
@@ -35,7 +45,9 @@ export function createStores(options: CreateStoresOptions): AjentifyStores {
     storage: options.storage,
     storageKey: options.storageKey,
   });
-  const clientSideTools = createClientSideToolsStore();
+  const clientSideTools = createClientSideToolsStore({
+    onToolCall: options.onToolCall,
+  });
   const currentContext = createCurrentContextStore({
     websocketUrl: options.websocketUrl,
     contextsStore: contexts,
@@ -47,5 +59,6 @@ export function createStores(options: CreateStoresOptions): AjentifyStores {
     onError: options.onError,
     agentSpeaksFirst: options.agentSpeaksFirst,
   });
-  return { currentContext, contexts, clientSideTools };
+  const panel = createPanelStore(options.panelDefaultOpen);
+  return { currentContext, contexts, clientSideTools, panel };
 }

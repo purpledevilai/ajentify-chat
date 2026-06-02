@@ -14,3 +14,4 @@ export {
   type UseContextHistoryResult,
 } from './useContextHistory';
 export { useGetPageData, useDoPageAction } from './usePageHooks';
+export { useChatPanel, type UseChatPanelResult } from './useChatPanel';

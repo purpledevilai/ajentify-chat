@@ -106,7 +106,7 @@ export function TypingText({
     <span className={className}>
       {visible}
       {!done && visible.length < text.length ? (
-        <span className="inline-block w-[0.5ch] animate-aj-blink">▍</span>
+        <span className="aj-caret">▍</span>
       ) : null}
     </span>
   );

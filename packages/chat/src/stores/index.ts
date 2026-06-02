@@ -1,4 +1,4 @@
-export { createStores, type CreateStoresOptions } from './createStores';
+export { createStores, type CreateStoresOptions, type OnToolCallCallback } from './createStores';
 export {
   createCurrentContextStore,
   type CurrentContextStore,
@@ -16,4 +16,5 @@ export {
   type PageDataGetter,
   type PageActionHandler,
 } from './clientSideToolsStore';
+export { createPanelStore, type PanelStore } from './panelStore';
 export type { AjentifyStores } from './types';

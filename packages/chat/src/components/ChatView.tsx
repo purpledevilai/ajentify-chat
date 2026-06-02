@@ -15,6 +15,7 @@ export interface ChatViewClassNames {
   root?: string;
   body?: string;
   empty?: string;
+  inputDock?: string;
   header?: ChatHeaderClassNames;
   messages?: ChatMessagesClassNames;
   input?: ChatInputClassNames;
@@ -49,6 +50,17 @@ export interface ChatViewProps {
    */
   newChatView?: React.ReactNode | null;
   /**
+   * Optional starter prompts shown under the new-chat hero. Clicking one
+   * sends it immediately, materializing the draft and starting the chat.
+   * Forwarded to `<ChatMessages suggestedPrompts={...} />`.
+   */
+  suggestedPrompts?: string[];
+  /**
+   * Disable the inline "Running `tool_name`…" indicator on pending
+   * client-side tool calls. Defaults to `false` (indicator enabled).
+   */
+  hideToolRunningIndicator?: boolean;
+  /**
    * Forwarded to `<ChatInput />`. Placeholder shown in the textarea.
    * Defaults to `'Ask anything…'`.
    */
@@ -80,6 +92,8 @@ export function ChatView({
   emptyState,
   waitingIndicator,
   newChatView,
+  suggestedPrompts,
+  hideToolRunningIndicator,
   inputPlaceholder,
 }: ChatViewProps): JSX.Element {
   const { hasContext, status } = useChat();
@@ -119,12 +133,7 @@ export function ChatView({
   }, [createNew]);
 
   return (
-    <div
-      className={cn(
-        'aj-root flex h-full w-full flex-col overflow-hidden bg-background text-foreground',
-        classNames?.root
-      )}
-    >
+    <div className={cn('aj-root', 'aj-view', classNames?.root)}>
       {showHeader ? (
         <ChatHeader
           title={title}
@@ -134,22 +143,17 @@ export function ChatView({
         />
       ) : null}
 
-      <div className={cn('relative flex-1 min-h-0', classNames?.body)}>
+      <div className={cn('aj-view-body', classNames?.body)}>
         {showingHistory ? (
           <ChatHistory
             onBack={() => setShowingHistory(false)}
             classNames={classNames?.history}
           />
         ) : !hasContext ? (
-          <div
-            className={cn(
-              'flex h-full flex-col items-center justify-center gap-3 px-6 text-center text-sm text-muted-foreground',
-              classNames?.empty
-            )}
-          >
+          <div className={cn('aj-view-empty', classNames?.empty)}>
             {emptyState ?? (
               <>
-                <p>
+                <p style={{ margin: 0 }}>
                   {autoStartFailedRef.current
                     ? "Couldn't start a new chat."
                     : 'Starting a new chat…'}
@@ -160,16 +164,16 @@ export function ChatView({
                     disabled={creating || status === 'connecting'}
                   >
                     {creating || status === 'connecting' ? (
-                      <>
-                        <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem' }}>
+                        <Loader2 className="aj-spin" style={{ width: '0.875rem', height: '0.875rem' }} />
                         Retrying…
-                      </>
+                      </span>
                     ) : (
                       'Try again'
                     )}
                   </Button>
                 ) : (
-                  <Loader2 className="h-4 w-4 animate-spin" />
+                  <Loader2 className="aj-spin" style={{ width: '1rem', height: '1rem' }} />
                 )}
               </>
             )}
@@ -179,12 +183,14 @@ export function ChatView({
             classNames={classNames?.messages}
             waitingIndicator={waitingIndicator}
             newChatView={newChatView}
+            suggestedPrompts={suggestedPrompts}
+            hideToolRunningIndicator={hideToolRunningIndicator}
           />
         )}
       </div>
 
       {!showingHistory && hasContext ? (
-        <div className="border-t border-border bg-background px-3 py-3">
+        <div className={cn('aj-input-dock', classNames?.inputDock)}>
           <ChatInput
             classNames={classNames?.input}
             placeholder={inputPlaceholder}

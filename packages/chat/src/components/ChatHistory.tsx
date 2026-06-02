@@ -73,11 +73,6 @@ export function ChatHistory({
 
   React.useEffect(() => {
     if (!autoLoad) return;
-    // Always trigger a refetch when the panel mounts. The cached list (if
-    // any) keeps rendering during the round-trip — see the JSDoc on
-    // `autoLoad` and the `loading && !loaded` gate below — so opening the
-    // history view feels instant while still surfacing freshly-created or
-    // server-side changes.
     void load().catch(() => {
       // Failures land on `historyError`; the cached rows stay rendered.
     });
@@ -99,20 +94,15 @@ export function ChatHistory({
   );
 
   return (
-    <div className={cn('flex h-full w-full flex-col bg-background', classNames?.root)}>
-      <div
-        className={cn(
-          'flex items-center justify-between border-b border-border px-3 py-2',
-          classNames?.header
-        )}
-      >
-        <div className="flex items-center gap-2">
+    <div className={cn('aj-history', classNames?.root)}>
+      <div className={cn('aj-history-header', classNames?.header)}>
+        <div className="aj-history-header-title">
           {onBack ? (
             <IconButton label="Back" onClick={onBack}>
-              <ArrowLeft className="h-4 w-4" />
+              <ArrowLeft />
             </IconButton>
           ) : null}
-          <span className="text-sm font-semibold">Chat history</span>
+          <span>Chat history</span>
         </div>
         <Button
           variant="secondary"
@@ -122,80 +112,70 @@ export function ChatHistory({
             onBack?.();
           }}
         >
-          <Plus className="mr-1 h-3.5 w-3.5" />
+          <Plus style={{ marginRight: '0.25rem', width: '0.875rem', height: '0.875rem' }} />
           New chat
         </Button>
       </div>
 
-      <div className="flex-1 overflow-y-auto">
-        {loading && !loaded ? (
-          <div className="px-4 py-6 text-sm text-muted-foreground">Loading…</div>
-        ) : error && !loaded ? (
-          <div className="px-4 py-6 text-sm text-destructive">
-            Failed to load history: {error}
-          </div>
-        ) : history.length === 0 ? (
-          <div
-            className={cn(
-              'flex h-full flex-col items-center justify-center px-6 py-12 text-center text-sm text-muted-foreground',
-              classNames?.empty
-            )}
-          >
-            <MessageSquare className="mb-2 h-6 w-6 opacity-50" />
-            No previous chats yet.
-          </div>
-        ) : (
-          <ul className="divide-y divide-border">
-            {history.map((h) => {
-              const isCurrent = h.context_id === currentContextId;
-              const isDeleting = deletingId === h.context_id;
-              return (
-                <li key={h.context_id} className="group relative">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      void switchTo(h.context_id);
-                      onBack?.();
-                    }}
-                    className={cn(
-                      'flex w-full flex-col items-start gap-1 px-4 py-3 pr-12 text-left hover:bg-accent/60 transition-colors',
-                      isCurrent && 'bg-accent/40',
-                      classNames?.item
-                    )}
-                  >
-                    <div className="flex w-full items-center justify-between gap-2">
-                      <span className="truncate text-sm font-medium">
-                        {h.agent.agent_name || 'Chat'}
-                      </span>
-                      <span className="shrink-0 text-[11px] text-muted-foreground">
-                        {formatTimestamp(h.updated_at)}
-                      </span>
-                    </div>
-                    <span className="line-clamp-2 text-xs text-muted-foreground">
-                      {h.last_message || '(empty conversation)'}
+      {loading && !loaded ? (
+        <div className="aj-history-loading">Loading…</div>
+      ) : error && !loaded ? (
+        <div className="aj-history-error">Failed to load history: {error}</div>
+      ) : history.length === 0 ? (
+        <div className={cn('aj-history-empty', classNames?.empty)}>
+          <MessageSquare aria-hidden />
+          No previous chats yet.
+        </div>
+      ) : (
+        <ul className="aj-history-list">
+          {history.map((h) => {
+            const isCurrent = h.context_id === currentContextId;
+            const isDeleting = deletingId === h.context_id;
+            return (
+              <li key={h.context_id}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    void switchTo(h.context_id);
+                    onBack?.();
+                  }}
+                  className={cn(
+                    'aj-history-item',
+                    isCurrent && 'aj-history-item--current',
+                    classNames?.item,
+                  )}
+                >
+                  <div className="aj-history-item-row">
+                    <span className="aj-history-item-name">
+                      {h.agent.agent_name || 'Chat'}
                     </span>
-                  </button>
-                  {enableDelete ? (
-                    <div className="absolute right-2 top-1/2 -translate-y-1/2">
-                      <IconButton
-                        label="Delete chat"
-                        disabled={isDeleting}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          void onDelete(h.context_id);
-                        }}
-                        className="opacity-60 transition-opacity hover:opacity-100 hover:text-destructive"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </IconButton>
-                    </div>
-                  ) : null}
-                </li>
-              );
-            })}
-          </ul>
-        )}
-      </div>
+                    <span className="aj-history-item-time">
+                      {formatTimestamp(h.updated_at)}
+                    </span>
+                  </div>
+                  <span className="aj-history-item-preview">
+                    {h.last_message || '(empty conversation)'}
+                  </span>
+                </button>
+                {enableDelete ? (
+                  <div className="aj-history-delete">
+                    <IconButton
+                      label="Delete chat"
+                      disabled={isDeleting}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        void onDelete(h.context_id);
+                      }}
+                    >
+                      <Trash2 />
+                    </IconButton>
+                  </div>
+                ) : null}
+              </li>
+            );
+          })}
+        </ul>
+      )}
     </div>
   );
 }

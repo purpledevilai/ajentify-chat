@@ -4,8 +4,6 @@ import * as React from 'react';
 import { Send } from 'lucide-react';
 import { useChat } from '../hooks/useChat';
 import { cn } from '../lib/utils';
-import { Textarea } from './primitives/Textarea';
-import { IconButton } from './primitives/IconButton';
 
 export interface ChatInputClassNames {
   root?: string;
@@ -105,14 +103,8 @@ export function ChatInput({
   );
 
   return (
-    <div
-      className={cn(
-        'flex items-end gap-2 rounded-2xl border border-border bg-card px-3 py-2 shadow-sm',
-        'focus-within:ring-2 focus-within:ring-ring',
-        classNames?.root
-      )}
-    >
-      <Textarea
+    <div className={cn('aj-input', classNames?.root)}>
+      <textarea
         ref={textareaRef}
         rows={1}
         value={value}
@@ -120,22 +112,19 @@ export function ChatInput({
         onKeyDown={onKeyDown}
         placeholder={placeholder}
         aria-busy={sendBlocked || undefined}
-        className={cn(
-          'min-h-[36px] flex-1 resize-none border-0 bg-transparent p-0 text-sm focus-visible:ring-0 focus-visible:ring-offset-0',
-          classNames?.textarea
-        )}
+        className={cn('aj-input-textarea', classNames?.textarea)}
         style={{ maxHeight: maxHeightPx }}
       />
-      <IconButton
-        label="Send"
-        variant="default"
+      <button
         type="button"
+        aria-label="Send"
+        title="Send"
         onClick={() => void submit()}
         disabled={sendBlocked || value.trim().length === 0}
-        className={cn('rounded-full', classNames?.sendButton)}
+        className={cn('aj-input-send', classNames?.sendButton)}
       >
-        <Send className="h-4 w-4" />
-      </IconButton>
+        <Send aria-hidden />
+      </button>
     </div>
   );
 }

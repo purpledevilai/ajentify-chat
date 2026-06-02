@@ -17,7 +17,7 @@ export const IconButton = React.forwardRef<HTMLButtonElement, IconButtonProps>(
         variant={variant}
         aria-label={label}
         title={label}
-        className={cn('h-8 w-8 rounded-md', className)}
+        className={cn('aj-icon-button', className)}
         {...props}
       >
         {children}

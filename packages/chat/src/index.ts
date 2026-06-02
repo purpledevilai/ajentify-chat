@@ -27,5 +27,21 @@ export {
   type TokenStreamingEvents,
 } from './ws/TokenStreamingClient';
 
+// DX helpers (v0.2) — every Ajentify integration ends up writing these,
+// so we ship the canonical versions.
+export {
+  createAjentifyEventClient,
+  type AjentifyEventClientOptions,
+} from './lib/eventClient';
+export {
+  defineClientSideTools,
+  type ToolSchema,
+  type ToolSpecs,
+  type ToolHandler,
+  type ToolHandlers,
+  type DefineClientSideToolsOptions,
+} from './lib/defineTools';
+
 // Utilities
 export { cn, createSafeStorage, uid } from './lib/utils';
+export { injectChatStyles } from './lib/injectStyles';

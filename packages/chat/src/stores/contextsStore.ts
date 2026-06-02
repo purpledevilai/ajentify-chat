@@ -143,6 +143,70 @@ async function dispatch<E extends AjentifyEvent>(
   return (await onEvent(event)) as AjentifyEventResult<E>;
 }
 
+// ---- Per-variant resolve-shape validation -------------------------------
+//
+// Every variant has a documented expected return shape (see the JSDoc on
+// `AjentifyEvent`). When the dev's `onAjentifyEvent` resolves with something
+// else — usually because they forgot to unwrap a backend envelope — we
+// can't actually use the value, so the SDK was rejecting later with a
+// generic "callback failed" message that hid the real bug. v0.2 surfaces
+// the bug at the dispatch site with a hint about the expected shape.
+
+function isPlainObject(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v !== null && !Array.isArray(v);
+}
+function describeShape(v: unknown): string {
+  if (v === null) return 'null';
+  if (Array.isArray(v)) return `array(length=${v.length})`;
+  if (isPlainObject(v)) {
+    const keys = Object.keys(v).slice(0, 5).join(', ');
+    return `object({ ${keys}${Object.keys(v).length > 5 ? ', …' : ''} })`;
+  }
+  return typeof v;
+}
+function validateCreateContext(raw: unknown): CreateContextResponse {
+  if (!isPlainObject(raw)) {
+    throw new AjentifyError(
+      `'create_context' callback resolved with ${describeShape(raw)} but ` +
+        `expected an object matching CreateContextResponse (must include 'context_id', 'agent_id'). ` +
+        `Did your backend wrap the response (e.g. '{ data: { ... } }')?`,
+      'callback',
+    );
+  }
+  if (typeof raw.context_id !== 'string' || !raw.context_id) {
+    throw new AjentifyError(
+      `'create_context' callback resolved without a 'context_id' string. ` +
+        `Received ${describeShape(raw)}. The dev's backend must return the ` +
+        `body of POST /context unchanged.`,
+      'callback',
+    );
+  }
+  return raw as unknown as CreateContextResponse;
+}
+function validateGetContext(raw: unknown): FilteredContext {
+  if (!isPlainObject(raw) || typeof raw.context_id !== 'string') {
+    throw new AjentifyError(
+      `'get_context' callback resolved with ${describeShape(raw)} but ` +
+        `expected a FilteredContext (must include 'context_id', 'messages'). ` +
+        `If your backend returns '{ context: ... }', unwrap it first.`,
+      'callback',
+    );
+  }
+  return raw as unknown as FilteredContext;
+}
+function validateGetContextHistory(raw: unknown): HistoryContext[] {
+  if (Array.isArray(raw)) return raw as HistoryContext[];
+  if (isPlainObject(raw) && Array.isArray(raw.contexts)) {
+    return raw.contexts as HistoryContext[];
+  }
+  throw new AjentifyError(
+    `'get_context_history' callback resolved with ${describeShape(raw)} but ` +
+      `expected an array of HistoryContext (or '{ contexts: HistoryContext[] }'). ` +
+      `If you proxy GET /context-history, return the response body unchanged.`,
+    'callback',
+  );
+}
+
 export function createContextsStore(options: ContextsStoreOptions) {
   const storage = options.storage === null ? null : options.storage ?? createSafeStorage('localStorage');
   const storageKey = options.storageKey ?? 'ajentify.chat';
@@ -192,10 +256,11 @@ export function createContextsStore(options: ContextsStoreOptions) {
     createContext: async (req) => {
       set({ creating: true, createError: null });
       try {
-        const created = await dispatch(options.onEvent, {
+        const rawCreated = await dispatch(options.onEvent, {
           type: 'create_context',
           request: req,
         });
+        const created = validateCreateContext(rawCreated);
         const newClientId = created.client_id ?? get().clientId ?? null;
         // Public-agent flows return a long-lived `client_api_key` on creation.
         // For private flows the dev's backend either returned it on the
@@ -231,15 +296,19 @@ export function createContextsStore(options: ContextsStoreOptions) {
 
     generateAccessToken: async () => {
       try {
-        const token = await dispatch(options.onEvent, {
+        const raw = await dispatch(options.onEvent, {
           type: 'generate_access_token',
         });
-        if (typeof token !== 'string' || token.length === 0) {
+        if (typeof raw !== 'string' || raw.length === 0) {
           throw new AjentifyError(
-            'generate_access_token callback returned an empty token',
-            'callback'
+            `'generate_access_token' callback resolved with ${describeShape(raw)} ` +
+              `but expected a non-empty string. ` +
+              `Did you forget to unwrap '{ token }' from the upstream ` +
+              `/generate-api-key response?`,
+            'callback',
           );
         }
+        const token = raw;
         // Persist alongside contextId so a refresh keeps continuity.
         set({ accessToken: token });
         writePersisted(storage, storageKey, {
@@ -260,16 +329,11 @@ export function createContextsStore(options: ContextsStoreOptions) {
 
     loadContext: async (contextId) => {
       try {
-        const ctx = await dispatch(options.onEvent, {
+        const raw = await dispatch(options.onEvent, {
           type: 'get_context',
           contextId,
         });
-        if (!ctx?.context_id) {
-          throw new AjentifyError(
-            'get_context callback returned an invalid context payload',
-            'callback'
-          );
-        }
+        const ctx = validateGetContext(raw);
         if (ctx.client_id) {
           set({ clientId: ctx.client_id });
         }
@@ -288,14 +352,13 @@ export function createContextsStore(options: ContextsStoreOptions) {
           const raw = await dispatch(options.onEvent, {
             type: 'get_context_history',
           });
-          const list: HistoryContext[] = Array.isArray(raw)
-            ? raw
-            : (raw as { contexts?: HistoryContext[] })?.contexts ?? [];
+          const list = validateGetContextHistory(raw);
           set({ history: list, historyLoading: false, historyLoaded: true });
           return list;
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);
           set({ historyLoading: false, historyError: msg });
+          if (err instanceof AjentifyError) throw err;
           throw new AjentifyError(
             'get_context_history callback failed',
             'callback',

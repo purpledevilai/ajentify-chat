@@ -51,29 +51,19 @@ export function ChatHeader({
   const displayTitle = title ?? agent?.agent_name ?? 'Assistant';
 
   return (
-    <div
-      className={cn(
-        'flex items-center justify-between gap-2 border-b border-border bg-background px-3 py-2',
-        classNames?.root
-      )}
-    >
-      <div
-        className={cn(
-          'flex min-w-0 items-center gap-2 text-sm font-semibold',
-          classNames?.title
-        )}
-      >
-        <Sparkles className="h-4 w-4 text-primary" />
-        <span className="truncate">{displayTitle}</span>
+    <div className={cn('aj-header', classNames?.root)}>
+      <div className={cn('aj-header-title', classNames?.title)}>
+        <Sparkles aria-hidden />
+        <span className="aj-header-title-text">{displayTitle}</span>
       </div>
-      <div className={cn('flex items-center gap-0.5', classNames?.buttons)}>
+      <div className={cn('aj-header-buttons', classNames?.buttons)}>
         {showNew ? (
           <IconButton
             label="New chat"
             onClick={() => (onNewChat ? onNewChat() : void createNew())}
             className={classNames?.button}
           >
-            <Plus className="h-4 w-4" />
+            <Plus />
           </IconButton>
         ) : null}
         {showHistory ? (
@@ -82,7 +72,7 @@ export function ChatHeader({
             onClick={onShowHistory}
             className={classNames?.button}
           >
-            <HistoryIcon className="h-4 w-4" />
+            <HistoryIcon />
           </IconButton>
         ) : null}
         {rightSlot}
@@ -92,7 +82,7 @@ export function ChatHeader({
             onClick={onClose}
             className={classNames?.button}
           >
-            <X className="h-4 w-4" />
+            <X />
           </IconButton>
         ) : null}
       </div>

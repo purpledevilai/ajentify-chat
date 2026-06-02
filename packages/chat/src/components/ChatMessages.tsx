@@ -19,6 +19,10 @@ export interface ChatMessagesClassNames {
   newChatTitle?: string;
   /** The icon container above the default greeting headline. */
   newChatIcon?: string;
+  /** Wrapper around the suggested-prompt buttons (when `suggestedPrompts` is set). */
+  newChatPrompts?: string;
+  /** Each individual suggested-prompt button. */
+  newChatPrompt?: string;
   message?: MessageClassNames;
 }
 
@@ -51,6 +55,18 @@ export interface ChatMessagesProps {
    * - Pass `null` to render nothing in the draft state.
    */
   newChatView?: React.ReactNode | null;
+  /**
+   * Optional starter prompts shown under the new-chat hero. Clicking one
+   * sends it as the user's first message (and materializes the draft). The
+   * array is rendered as a stack of clickable chips; pass `[]` or omit to
+   * hide.
+   */
+  suggestedPrompts?: string[];
+  /**
+   * Disable the inline "Running `tool_name`…" indicator on pending client-side
+   * tool calls. Defaults to `false` (indicator enabled).
+   */
+  hideToolRunningIndicator?: boolean;
 }
 
 const DEFAULT_NEW_CHAT_TITLE = 'Hello! How can I help?';
@@ -67,8 +83,10 @@ export function ChatMessages({
   noAnimation,
   waitingIndicator,
   newChatView,
+  suggestedPrompts,
+  hideToolRunningIndicator,
 }: ChatMessagesProps): JSX.Element {
-  const { messages, pendingResponse, status, isWaitingForResponse } = useChat();
+  const { messages, pendingResponse, status, isWaitingForResponse, send } = useChat();
   const containerRef = React.useRef<HTMLDivElement | null>(null);
   const stickToBottomRef = React.useRef(true);
 
@@ -87,6 +105,17 @@ export function ChatMessages({
       },
     ];
   }, [messages, pendingResponse]);
+
+  // Pre-compute which tool_call messages have *not* received a matching
+  // tool_response yet. Combined with `status === 'awaiting_tool_responses'`
+  // this drives the inline "Running…" indicator.
+  const respondedToolCallIds = React.useMemo(() => {
+    const responded = new Set<string>();
+    for (const m of messages) {
+      if (m.kind === 'tool_response') responded.add(m.toolCallId);
+    }
+    return responded;
+  }, [messages]);
 
   const showWaiting = isWaitingForResponse && waitingIndicator !== null;
 
@@ -111,44 +140,38 @@ export function ChatMessages({
   }, []);
 
   const isEmpty = renderItems.length === 0 && !showWaiting && !showNewChatView;
+  const canSendSuggestion =
+    status === 'draft' || status === 'connected' || status === 'idle';
 
   return (
     <div
       ref={containerRef}
       onScroll={onScroll}
-      className={cn(
-        'h-full w-full overflow-y-auto',
-        '[scrollbar-width:thin]',
-        classNames?.root
-      )}
+      className={cn('aj-messages', classNames?.root)}
     >
-      <div
-        className={cn(
-          'mx-auto flex min-h-full flex-col gap-3 px-4 py-4',
-          'max-w-[760px]',
-          classNames?.inner
-        )}
-      >
+      <div className={cn('aj-messages-inner', classNames?.inner)}>
         {showNewChatView ? (
           <NewChatHero
             content={newChatView}
+            suggestedPrompts={suggestedPrompts}
+            onSuggestionClick={(text) => {
+              if (!canSendSuggestion) return;
+              void send(text);
+            }}
             classNames={{
               root: classNames?.newChat,
               title: classNames?.newChatTitle,
               icon: classNames?.newChatIcon,
+              prompts: classNames?.newChatPrompts,
+              prompt: classNames?.newChatPrompt,
             }}
           />
         ) : isEmpty ? (
-          <div
-            className={cn(
-              'flex flex-1 items-center justify-center text-center text-sm text-muted-foreground py-12',
-              classNames?.empty
-            )}
-          >
+          <div className={cn('aj-messages-empty', classNames?.empty)}>
             {emptyState ?? (
               status === 'connecting' ? (
-                <span className="inline-flex items-center gap-2">
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem' }}>
+                  <Loader2 className="aj-spin" style={{ width: '0.875rem', height: '0.875rem' }} />
                   Loading conversation…
                 </span>
               ) : (
@@ -161,15 +184,24 @@ export function ChatMessages({
             )}
           </div>
         ) : (
-          renderItems.map((m) => (
-            <Message
-              key={m.kind === 'text' ? m.localId : m.localId ?? uid('msg')}
-              message={m}
-              streaming={Boolean('pending' in m && m.pending)}
-              animate={!noAnimation}
-              classNames={classNames?.message}
-            />
-          ))
+          renderItems.map((m) => {
+            const isToolCall = m.kind === 'tool_call';
+            const toolRunning =
+              !hideToolRunningIndicator &&
+              isToolCall &&
+              status === 'awaiting_tool_responses' &&
+              !respondedToolCallIds.has(m.toolCallId);
+            return (
+              <Message
+                key={m.kind === 'text' ? m.localId : m.localId ?? uid('msg')}
+                message={m}
+                streaming={Boolean('pending' in m && m.pending)}
+                animate={!noAnimation}
+                toolRunning={toolRunning}
+                classNames={classNames?.message}
+              />
+            );
+          })
         )}
         {showWaiting ? (
           <WaitingBubble className={classNames?.waitingBubble}>
@@ -183,10 +215,20 @@ export function ChatMessages({
 
 function NewChatHero({
   content,
+  suggestedPrompts,
+  onSuggestionClick,
   classNames,
 }: {
   content: React.ReactNode;
-  classNames: { root?: string; title?: string; icon?: string };
+  suggestedPrompts?: string[];
+  onSuggestionClick: (text: string) => void;
+  classNames: {
+    root?: string;
+    title?: string;
+    icon?: string;
+    prompts?: string;
+    prompt?: string;
+  };
 }): JSX.Element {
   // When the dev passes a plain string we wrap it in our default centered
   // layout so they can swap the headline (e.g. `` `Hey there, ${name}` ``)
@@ -195,42 +237,63 @@ function NewChatHero({
   const headline = isString ? (content as string) : null;
   const useDefaultLayout = isString || content === undefined;
 
+  const promptList = (suggestedPrompts ?? []).filter((p) => p && p.trim().length > 0);
+
   if (!useDefaultLayout) {
     return (
-      <div
-        className={cn(
-          'flex flex-1 flex-col items-center justify-center px-4 py-12 text-center',
-          classNames.root
-        )}
-      >
+      <div className={cn('aj-newchat', classNames.root)}>
         {content}
+        {promptList.length > 0 ? (
+          <SuggestionList
+            prompts={promptList}
+            onClick={onSuggestionClick}
+            classNames={{ root: classNames.prompts, prompt: classNames.prompt }}
+          />
+        ) : null}
       </div>
     );
   }
 
   return (
-    <div
-      className={cn(
-        'flex flex-1 flex-col items-center justify-center gap-4 px-4 py-12 text-center',
-        classNames.root
-      )}
-    >
-      <div
-        className={cn(
-          'flex h-12 w-12 items-center justify-center rounded-full bg-secondary text-primary',
-          classNames.icon
-        )}
-      >
-        <Sparkles className="h-6 w-6" />
+    <div className={cn('aj-newchat', classNames.root)}>
+      <div className={cn('aj-newchat-icon', classNames.icon)}>
+        <Sparkles aria-hidden />
       </div>
-      <h2
-        className={cn(
-          'text-xl font-semibold tracking-tight text-foreground',
-          classNames.title
-        )}
-      >
+      <h2 className={cn('aj-newchat-title', classNames.title)}>
         {headline ?? DEFAULT_NEW_CHAT_TITLE}
       </h2>
+      {promptList.length > 0 ? (
+        <SuggestionList
+          prompts={promptList}
+          onClick={onSuggestionClick}
+          classNames={{ root: classNames.prompts, prompt: classNames.prompt }}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+function SuggestionList({
+  prompts,
+  onClick,
+  classNames,
+}: {
+  prompts: string[];
+  onClick: (text: string) => void;
+  classNames: { root?: string; prompt?: string };
+}): JSX.Element {
+  return (
+    <div className={cn('aj-newchat-prompts', classNames.root)}>
+      {prompts.map((p, i) => (
+        <button
+          key={`${i}-${p}`}
+          type="button"
+          className={cn('aj-newchat-prompt', classNames.prompt)}
+          onClick={() => onClick(p)}
+        >
+          {p}
+        </button>
+      ))}
     </div>
   );
 }
@@ -243,13 +306,8 @@ function WaitingBubble({
   children: React.ReactNode;
 }): JSX.Element {
   return (
-    <div className="flex w-full justify-start" aria-live="polite">
-      <div
-        className={cn(
-          'max-w-[85%] rounded-2xl rounded-bl-md bg-secondary px-3.5 py-2 text-sm leading-relaxed text-secondary-foreground',
-          className
-        )}
-      >
+    <div className="aj-message-row aj-message-row--ai" aria-live="polite">
+      <div className={cn('aj-message-bubble', 'aj-message-bubble--waiting', className)}>
         {children}
       </div>
     </div>
@@ -258,19 +316,10 @@ function WaitingBubble({
 
 function BouncingDots(): JSX.Element {
   return (
-    <span className="inline-flex items-center gap-1" aria-label="Waiting for response">
-      <span
-        className="h-1.5 w-1.5 rounded-full bg-current opacity-50 animate-aj-dot-bounce"
-        style={{ animationDelay: '0ms' }}
-      />
-      <span
-        className="h-1.5 w-1.5 rounded-full bg-current opacity-50 animate-aj-dot-bounce"
-        style={{ animationDelay: '160ms' }}
-      />
-      <span
-        className="h-1.5 w-1.5 rounded-full bg-current opacity-50 animate-aj-dot-bounce"
-        style={{ animationDelay: '320ms' }}
-      />
+    <span className="aj-dots" aria-label="Waiting for response">
+      <span className="aj-dot aj-dot--1" />
+      <span className="aj-dot aj-dot--2" />
+      <span className="aj-dot aj-dot--3" />
     </span>
   );
 }

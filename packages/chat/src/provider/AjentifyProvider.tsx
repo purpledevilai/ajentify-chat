@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, type ReactNode } from 'react';
 import {
   createStores,
   type ClientSideToolHandler,
+  type OnToolCallCallback,
 } from '../stores';
 import type { AjentifyStores } from '../stores/types';
 import type {
@@ -12,6 +13,7 @@ import type {
   AjentifyEventHandler,
 } from '../types';
 import { createSafeStorage } from '../lib/utils';
+import { injectChatStyles } from '../lib/injectStyles';
 import { AjentifyContext } from './context';
 
 export type StorageOption =
@@ -28,6 +30,9 @@ export interface AjentifyConfig {
    * context). The dev's backend should expose **one** endpoint that routes
    * on `event.type` and proxies to the Ajentify REST API with their org
    * API key. See `AjentifyEvent` for the variant contract.
+   *
+   * Use `createAjentifyEventClient({ url: '/api/ajentify-event' })` from
+   * `@ajentify/chat` to skip the boilerplate.
    */
   onAjentifyEvent: AjentifyEventHandler;
   /** Override the token streaming WebSocket URL. */
@@ -37,6 +42,9 @@ export interface AjentifyConfig {
    * `get_page_data` / `do_page_action`. Receives the tool name, the agent's
    * arguments, and the call's id; return a string (or anything stringifiable)
    * for the agent.
+   *
+   * Use `defineClientSideTools<TTools>(...)` from `@ajentify/chat` to get
+   * a typed per-tool handler map.
    */
   clientSideTools?: ClientSideToolHandler;
   /** Where to persist `{ contextId, accessToken, clientId }`. Defaults to `localStorage`. */
@@ -56,6 +64,12 @@ export interface AjentifyConfig {
   /** Surface internal AjentifyErrors (transport, tool, callback, etc). */
   onError?: (err: AjentifyError) => void;
   /**
+   * Analytics-style callback fired for every client-side tool dispatch
+   * (`get_page_data`, `do_page_action`, custom tools). Receives the tool name,
+   * the args the agent passed, duration, success flag, and any error.
+   */
+  onToolCall?: OnToolCallCallback;
+  /**
    * Eagerly create + connect on `startNewContext()` (mount, "+ new chat",
    * "+ New chat" in history) so the agent can stream its first message
    * before the user types. Defaults to `false`, in which case those entry
@@ -65,12 +79,34 @@ export interface AjentifyConfig {
    */
   agentSpeaksFirst?: boolean;
   /**
+   * Initial open/closed state of the chat panel. Mostly useful for routes
+   * where the chat should auto-open (e.g. `/help`). Defaults to `false`.
+   *
+   * Subsequent toggles flow through `useChatPanel()` /
+   * `<ChatToggleButton />`; pass `open` directly on `<ChatPanel />` to run
+   * it as a controlled component instead.
+   */
+  panelDefaultOpen?: boolean;
+  /**
+   * Skip the auto-injected bundled stylesheet. The chat's CSS is normally
+   * pushed into `<head>` on first mount (idempotent). Set to true if you
+   * already pre-load `@ajentify/chat/styles.css` via your own bundler and
+   * don't want the duplicate `<style>` tag.
+   */
+  disableStyleInject?: boolean;
+  /**
    * Hook the chat's `--aj-*` token contract up to the host app's own CSS
    * variables so chat re-themes automatically (including live light/dark
    * toggles via class swaps).
    *
+   * Since v0.2 the chat's tokens are **full CSS colors** (oklch / hex / rgb
+   * / hsl — any format). Bridges therefore just alias one variable to
+   * another via `var()` — no `hsl()` wrapping required. This means the same
+   * config works against modern shadcn (oklch), Radix Themes, Mantine,
+   * custom palettes — anything that exposes a CSS variable.
+   *
    * - `'shadcn'`: aliases `--aj-*` to shadcn/ui's un-prefixed `--background`,
-   *   `--foreground`, `--primary`, ... (HSL channels). Picks up dark values
+   *   `--foreground`, `--primary`, ... CSS variables. Picks up dark values
    *   under `.dark` automatically.
    * - `{ tokens, selectors? }`: map any subset of `--aj-*` tokens to your
    *   own host variable names, e.g.
@@ -189,7 +225,7 @@ function resolveStorage(option: StorageOption | undefined): Storage | null {
 
 /**
  * The single React entry point developers wrap their app in. Owns one
- * instance of the three Zustand stores and supplies it via React context.
+ * instance of the four Zustand stores and supplies it via React context.
  *
  * The provider is intentionally created **once** per mount and never re-built
  * when `config` changes (you should not change callbacks at runtime). To
@@ -217,9 +253,20 @@ export function AjentifyProvider({ config, children }: AjentifyProviderProps): J
       onEvents: (...args) => configRef.current.onEvents?.(...args),
       onError: (err) => configRef.current.onError?.(err),
       agentSpeaksFirst: config.agentSpeaksFirst,
+      panelDefaultOpen: config.panelDefaultOpen,
+      // Plumb the latest closure through; the store wires it into every
+      // dispatch (including get_page_data / do_page_action).
+      onToolCall: (info) => configRef.current.onToolCall?.(info),
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Auto-inject the bundled stylesheet on first mount. Idempotent —
+  // safe under React 18 strict double-mount and multiple providers.
+  useEffect(() => {
+    if (config.disableStyleInject) return;
+    injectChatStyles();
+  }, [config.disableStyleInject]);
 
   useEffect(() => {
     stores.clientSideTools.getState().setClientSideToolHandler(
@@ -247,6 +294,11 @@ export function AjentifyProvider({ config, children }: AjentifyProviderProps): J
 /**
  * Builds the `--aj-*: var(--host, var(--aj-*))` alias declarations that map
  * a host's CSS variables onto the chat's token contract.
+ *
+ * Since v0.2 the chat's tokens are full CSS colors (hex / rgb / oklch / hsl,
+ * any format) — the alias just passes the host value through. The fallback
+ * to the chat's own `--aj-*` default keeps the chat looking right even on
+ * pages where the host hasn't declared the variable yet.
  */
 function buildAliasDeclarations(
   tokens: Partial<Record<AjThemeToken, string>>
@@ -289,8 +341,7 @@ function ThemeBridge({ bridge }: { bridge: ThemeBridgeOption }): JSX.Element {
 
   return (
     <style
-      // Chat tokens are HSL channels (e.g. "240 10% 4%") to allow `/<alpha>`
-      // utilities — host vars must use the same format for shadcn-style maps.
+      data-aj-theme-bridge=""
       dangerouslySetInnerHTML={{ __html: `\n        ${css}\n      ` }}
     />
   );

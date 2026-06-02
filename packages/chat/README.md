@@ -1,6 +1,8 @@
 # @ajentify/chat
 
-A React npm package that gives developers a fully headless logic layer (Zustand stores + hooks) and an optional UI (shadcn-style components built on Radix + Tailwind) for connecting to the [Ajentify](https://api.ajentify.com) token streaming server.
+A React npm package that gives developers a fully headless logic layer (Zustand stores + hooks) and an optional UI (plain-CSS components built on Radix) for connecting to the [Ajentify](https://api.ajentify.com) token streaming server.
+
+> **v0.2 is a major release.** It's frictionless out of the box: no Tailwind / typography-plugin requirement on the host, auto-injected styles, full-color theme tokens, and built-in helpers for the event client, server router, panel state, and typed client-side tools. See [CHANGELOG.md](./CHANGELOG.md) for the migration steps.
 
 ## Install
 
@@ -10,54 +12,51 @@ npm install @ajentify/chat
 pnpm add @ajentify/chat
 ```
 
-The package ships **precompiled styles** so you don't need Tailwind in your app. Import once near the root:
+That's it — the chat's stylesheet is auto-injected from `<AjentifyProvider>` on first mount. No `import '@ajentify/chat/styles.css'` line, no Tailwind setup on the host. (If you want SSR pre-paint, the file is still exported and can be imported manually.)
 
-```ts
-import '@ajentify/chat/styles.css';
-```
-
-## Wire the provider
+## Quickstart
 
 ```tsx
-import { AjentifyProvider } from '@ajentify/chat';
-import { ChatPanel } from '@ajentify/chat/ui';
+import { AjentifyProvider, createAjentifyEventClient } from '@ajentify/chat';
+import { ChatPanel, ChatToggleButton } from '@ajentify/chat/ui';
+
+const onAjentifyEvent = createAjentifyEventClient({
+  url: '/api/ajentify-event',
+  credentials: 'include',
+});
 
 export function App() {
   return (
-    <AjentifyProvider
-      config={{
-        createContext: async (req) =>
-          fetch('/api/ajentify/context', {
-            method: 'POST',
-            headers: { 'content-type': 'application/json' },
-            body: JSON.stringify(req ?? {}),
-          }).then((r) => r.json()),
-        generateAccessToken: async () =>
-          // Your backend identifies the user from its own session and mints
-          // a token from their `client_id`. `contextId` is also passed in
-          // (not used here) — handy if you want to access-check it.
-          fetch(`/api/ajentify/token`, { method: 'POST' })
-            .then((r) => r.json())
-            .then((j) => j.token),
-        getContext: async (id) =>
-          fetch(`/api/ajentify/context/${id}`).then((r) => r.json()),
-        getContextHistory: async () =>
-          fetch(`/api/ajentify/context-history`).then((r) => r.json()),
-        // Optional catch-all for non-built-in client-side tools.
-        // (`get_page_data` / `do_page_action` are handled automatically by the
-        // `useGetPageData` / `useDoPageAction` hooks. The `navigate` tool can
-        // be handled here too — see "Navigation" below.)
-        clientSideTools: async (toolName, args) => `unhandled tool: ${toolName}`,
-      }}
-    >
-      <YourApp />
-      <ChatPanel defaultOpen={false} />
+    <AjentifyProvider config={{ onAjentifyEvent }}>
+      <header>
+        <ChatToggleButton label="Ask Aj" />
+      </header>
+      <ChatPanel desktopVariant="inline">
+        <YourPages />
+      </ChatPanel>
     </AjentifyProvider>
   );
 }
 ```
 
-The four callbacks are proxied through your own backend so your Ajentify **org-scoped API key never reaches the browser**.
+The backend route `/api/ajentify-event` proxies every event variant to the Ajentify REST API with your **org-scoped API key** so it never reaches the browser:
+
+```ts
+// app/api/ajentify-event/route.ts (Next.js App Router)
+import { createAjentifyEventRouter, toNextRouteHandler } from '@ajentify/chat/server';
+import { cookies } from 'next/headers';
+
+const handler = createAjentifyEventRouter({
+  apiKey: process.env.AJENTIFY_API_KEY!,
+  agentId: process.env.AJENTIFY_AGENT_ID!,
+  getClientId: () => cookies().get('ajentify_client_id')?.value ?? null,
+  setClientId: (_req, id) => cookies().set('ajentify_client_id', id, { httpOnly: true }),
+});
+
+export const POST = toNextRouteHandler(handler);
+```
+
+Express / Hono shims are exported alongside `toNextRouteHandler` from `@ajentify/chat/server`.
 
 ## Hooks
 
@@ -70,6 +69,7 @@ import {
   useClientSideTools,
   useGetPageData,
   useDoPageAction,
+  useChatPanel,        // v0.2: open/close the panel from anywhere
   useAjentifyConfig,
 } from '@ajentify/chat';
 ```
@@ -79,6 +79,30 @@ import {
 ```ts
 const { messages, send, status, agent, pendingResponse } = useChat();
 ```
+
+`useChatPanel()` reads/writes the built-in panel state — pair it with `<ChatToggleButton />` or roll your own button. Pass `open` / `onOpenChange` to `<ChatPanel />` to take over manually.
+
+## Client-side tools
+
+`defineClientSideTools<TTools>(...)` is a typed dispatcher that replaces the `args.x as string | undefined` casts every consumer was writing by hand:
+
+```ts
+import { defineClientSideTools } from '@ajentify/chat';
+
+type Tools = {
+  list_todos: { args: {}; result: Todo[] };
+  navigate:   { args: { path: string }; result: { ok: boolean } };
+};
+
+const clientSideTools = defineClientSideTools<Tools>({
+  list_todos: () => api.listTodos(),
+  navigate:   ({ path }) => { router.push(path); return { ok: true }; },
+});
+
+<AjentifyProvider config={{ onAjentifyEvent, clientSideTools }}>
+```
+
+Missing handlers throw a descriptive `AjentifyError` and warn in dev.
 
 ## Page-level tools
 
@@ -108,139 +132,98 @@ useDoPageAction(async (key, args) => {
 }, [orderId]);
 ```
 
-### Navigation
-
-The built-in `navigate` tool lets the agent move the user between routes. Handle it from the provider's `clientSideTools` catch-all so it can use whatever router your app uses:
-
-```tsx
-// React Router v6 — call useNavigate() inside a component that lives
-// under <BrowserRouter />, then pass the function into clientSideTools.
-const navigate = useNavigate();
-
-<AjentifyProvider
-  config={{
-    // ...
-    clientSideTools: async (toolName, args) => {
-      if (toolName === 'navigate') {
-        const path = (args.path ?? args.route ?? args.url) as string | undefined;
-        if (!path) return { ok: false, error: 'navigate is missing a `path` argument' };
-        navigate(path);
-        return { ok: true, path };
-      }
-      return `unhandled client tool: ${toolName}`;
-    },
-  }}
->
-```
-
-For Next.js App Router, swap `useNavigate()` for `useRouter()` from `next/navigation` and call `router.push(path)`.
-
 ## UI
 
 Importing from `@ajentify/chat/ui` is **optional** — use the headless hooks if you want your own UI. If you want the bundled experience:
 
 ```tsx
-import { ChatPanel, ChatView, ChatHeader, ChatMessages, ChatInput } from '@ajentify/chat/ui';
+import {
+  ChatPanel,
+  ChatView,
+  ChatHeader,
+  ChatMessages,
+  ChatInput,
+  ChatToggleButton,
+} from '@ajentify/chat/ui';
 ```
 
 `<ChatPanel />` is opinionated: slide-in from the right, draggable resize handle on desktop, full-screen sheet on mobile. `<ChatView />` is the fill-parent variant if you want to drop it inside your own layout.
+
+### Starter prompts
+
+Render 1–3 starter chips on the new-chat hero — clicking sends instantly:
+
+```tsx
+<ChatPanel
+  suggestedPrompts={['How does X work?', 'Show me my open orders']}
+  newChatView={`Hey there, ${user.firstName}`}
+/>
+```
 
 ### Mount behaviour
 
 When `<ChatView />` (or `<ChatPanel />`) mounts on a fresh session, it auto-calls `startNewContext()` so the user lands on a ready-to-type chat. The provider's `agentSpeaksFirst` flag is the only knob:
 
-- `agentSpeaksFirst: false` (default) — enters a local `'draft'` state. No `create_context` call is made until the user sends their first message. Cheap mounts; perfect for embeds where most opens never become real conversations.
+- `agentSpeaksFirst: false` (default) — enters a local `'draft'` state. No `create_context` call is made until the user sends their first message.
 - `agentSpeaksFirst: true` — eagerly calls `create_context` and opens the WebSocket so the agent can stream its greeting before the user types.
 
-```tsx
-<AjentifyProvider config={{ ...rest, agentSpeaksFirst: true }}>
-  <ChatPanel />
-</AjentifyProvider>
-```
-
-If the eager call fails, the chat falls back to a "Couldn't start a new chat — Try again" affordance and does not auto-retry. Customise it with the `emptyState` prop on `<ChatView />` / `<ChatPanel />`.
+If the eager call fails, the chat falls back to a "Couldn't start a new chat — Try again" affordance and does not auto-retry. Customise it with the `emptyState` prop.
 
 ## Theming
 
-The chat is themed entirely through **CSS custom properties** under the
-`--aj-*` namespace. That means:
-
-- Theme changes are **live** — toggling a class on `<html>` (or swapping a
-  `data-theme` attribute, or matching `prefers-color-scheme`) re-resolves the
-  variables and the chat repaints in place. No React props to thread, no
-  re-renders.
-- Whatever styling system your host uses works — Tailwind, plain CSS, CSS-in-JS,
-  Radix Themes, Mantine, MUI — as long as you can set CSS variables.
-
-Pick the integration that matches your app:
-
-### 1. Direct: define `--aj-*` yourself
-
-The simplest path. Override any token in your own stylesheet — values are
-HSL channels (no `hsl(...)` wrapper, no commas) so the chat can compose them
-with alpha utilities:
+Every visual surface is themed through **plain CSS custom properties** under the `--aj-*` namespace. v0.2 ships them as **full CSS colors** (not HSL channels), so any color format works — `oklch(...)`, `#hex`, `rgb(...)`, `hsl(...)`. Alpha modulation is done internally via `color-mix(...)`.
 
 ```css
 :root {
-  --aj-primary: 270 95% 60%;
+  --aj-primary: oklch(0.55 0.18 270);
   --aj-radius: 1rem;
 }
 .dark {
-  --aj-background: 240 10% 4%;
-  --aj-foreground: 0 0% 98%;
+  --aj-background: #0a0a0a;
+  --aj-foreground: #fafafa;
 }
 ```
 
-No provider config needed. Toggle dark mode by adding/removing `class="dark"`
-on `<html>` (or any ancestor of the chat) — the chat updates immediately.
+Layout / spacing knobs are CSS variables too:
 
-### 2. shadcn/ui bridge
-
-If your app already defines shadcn's un-prefixed `--background`, `--foreground`,
-`--primary`, ... tokens, point the chat at them with one option:
-
-```tsx
-<AjentifyProvider config={{ ...rest, themeBridge: 'shadcn' }}>
+```css
+:root {
+  --aj-panel-width: 480px;
+  --aj-messages-padding-x: 1.5rem;
+  --aj-messages-padding-y: 2rem;
+  --aj-messages-gap: 1rem;
+  --aj-bubble-padding-x: 1rem;
+  --aj-bubble-padding-y: 0.625rem;
+  --aj-bubble-radius: 1.25rem;
+  --aj-prose-font-size: 0.9375rem;
+}
 ```
 
-The bridge declares aliases under `:root`, `.dark`, **and** `[data-theme]`,
-so dark-mode shadcn values reach the chat regardless of which selector
-strategy you use to flip themes.
+### shadcn / Radix Themes / Mantine bridge
 
-### 3. Custom token map
-
-For hosts that don't follow the shadcn naming, hand the bridge a map from
-chat tokens to your own variable names:
+Hand the chat your host's CSS variables — full colors pass through directly:
 
 ```tsx
-<AjentifyProvider
-  config={{
-    ...rest,
-    themeBridge: {
-      tokens: {
-        background: '--my-app-bg',
-        foreground: '--my-app-fg',
-        primary: '--my-app-accent',
-        border: '--my-app-line',
-      },
-      // optional — defaults to [':root', '.dark', '[data-theme]']
-      // selectors: [':root', '[data-mode="dark"]'],
-    },
-  }}
->
+<AjentifyProvider config={{ onAjentifyEvent, themeBridge: 'shadcn' }}>
 ```
 
-Any tokens you don't list keep their built-in defaults, so you can theme as
-much or as little as you want.
+Or supply a custom map:
+
+```tsx
+themeBridge={{
+  tokens: {
+    background: '--mantine-color-body',
+    foreground: '--mantine-color-text',
+    primary:    '--mantine-color-blue-6',
+    border:     '--mantine-color-default-border',
+  },
+}}
+```
 
 ### Per-slot overrides
 
-Every component also accepts a `classNames` prop for fine-grained tweaks:
-
-```tsx
-<ChatView classNames={{ messages: { aiBubble: 'bg-blue-100' } }} />
-```
+Every component still accepts a `classNames` prop for one-off tweaks; in most apps the CSS variables alone are enough.
 
 ## SSR / Next.js
 
-All components and hooks that touch browser APIs are marked `"use client"`. Put `<AjentifyProvider>` inside a client component near the root. `TokenStreamingClient` and the types are server-safe and can be imported from Server Components.
+All components and hooks that touch browser APIs are marked `"use client"`. Put `<AjentifyProvider>` inside a client component near the root. `TokenStreamingClient`, the types, and `@ajentify/chat/server` are server-safe.
