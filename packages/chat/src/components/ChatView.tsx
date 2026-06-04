@@ -1,8 +1,9 @@
 'use client';
 
 import * as React from 'react';
-import { Loader2 } from 'lucide-react';
+import { AlertCircle, Loader2, X } from 'lucide-react';
 import { useChat } from '../hooks/useChat';
+import { useAjentifyStores } from '../hooks/useAjentify';
 import { useContextHistory } from '../hooks/useContextHistory';
 import { cn } from '../lib/utils';
 import { ChatHeader, type ChatHeaderClassNames } from './ChatHeader';
@@ -16,6 +17,8 @@ export interface ChatViewClassNames {
   body?: string;
   empty?: string;
   inputDock?: string;
+  /** The floating error toast shown when something goes wrong. */
+  toast?: string;
   header?: ChatHeaderClassNames;
   messages?: ChatMessagesClassNames;
   input?: ChatInputClassNames;
@@ -65,6 +68,11 @@ export interface ChatViewProps {
    * Defaults to `'Ask anything…'`.
    */
   inputPlaceholder?: string;
+  /**
+   * How long (in ms) an error toast stays visible before auto-dismissing.
+   * Defaults to `8000` (8 seconds). Set to `0` to disable auto-dismiss.
+   */
+  toastDurationMs?: number;
 }
 
 /**
@@ -95,19 +103,67 @@ export function ChatView({
   suggestedPrompts,
   hideToolRunningIndicator,
   inputPlaceholder,
+  toastDurationMs = 8000,
 }: ChatViewProps): JSX.Element {
   const { hasContext, status } = useChat();
   const { createNew } = useContextHistory();
   const [showingHistory, setShowingHistory] = React.useState(false);
   const [creating, setCreating] = React.useState(false);
-  // One-shot guard: prevents an infinite loop when an `agentSpeaksFirst`
-  // provider's `create_context` keeps rejecting (the store rolls state back
-  // to idle on failure, which would otherwise re-flip `hasContext` and
-  // re-fire this effect). Reset whenever we successfully land on a context.
   const autoStartFailedRef = React.useRef(false);
   if (hasContext && autoStartFailedRef.current) {
     autoStartFailedRef.current = false;
   }
+
+  // --- Error toast state ---
+  const stores = useAjentifyStores();
+  const [toasts, setToasts] = React.useState<
+    { id: number; message: string }[]
+  >([]);
+  const nextIdRef = React.useRef(0);
+
+  const pushToast = React.useCallback(
+    (message: string) => {
+      const id = nextIdRef.current++;
+      setToasts((prev) => [...prev, { id, message }]);
+      if (toastDurationMs > 0) {
+        setTimeout(() => {
+          setToasts((prev) => prev.filter((t) => t.id !== id));
+        }, toastDurationMs);
+      }
+    },
+    [toastDurationMs],
+  );
+
+  const dismissToast = React.useCallback((id: number) => {
+    setToasts((prev) => prev.filter((t) => t.id !== id));
+  }, []);
+
+  // Subscribe to the store's `error` field. Every time it transitions from
+  // null → non-null we push a toast. This catches errors regardless of how
+  // quickly the state machine clears/re-drafts afterwards.
+  React.useEffect(() => {
+    let prevError: string | null = stores.currentContext.getState().error;
+    const unsub = stores.currentContext.subscribe((state) => {
+      if (state.error && state.error !== prevError) {
+        pushToast(state.error);
+      }
+      prevError = state.error;
+    });
+    return unsub;
+  }, [stores, pushToast]);
+
+  // Also catch createError from the contexts store (covers cases where the
+  // current-context store's error is cleared before we see it).
+  React.useEffect(() => {
+    let prevError: string | null = stores.contexts.getState().createError;
+    const unsub = stores.contexts.subscribe((state) => {
+      if (state.createError && state.createError !== prevError) {
+        pushToast(state.createError);
+      }
+      prevError = state.createError;
+    });
+    return unsub;
+  }, [stores, pushToast]);
 
   React.useEffect(() => {
     if (hasContext || creating) return;
@@ -144,6 +200,30 @@ export function ChatView({
       ) : null}
 
       <div className={cn('aj-view-body', classNames?.body)}>
+        {/* Error toasts — float above whatever view is showing */}
+        {toasts.length > 0 ? (
+          <div className="aj-toast-container">
+            {toasts.map((t) => (
+              <div
+                key={t.id}
+                className={cn('aj-toast', classNames?.toast)}
+                role="alert"
+              >
+                <AlertCircle className="aj-toast-icon" aria-hidden />
+                <p className="aj-toast-text">{t.message}</p>
+                <button
+                  type="button"
+                  className="aj-toast-dismiss"
+                  onClick={() => dismissToast(t.id)}
+                  aria-label="Dismiss"
+                >
+                  <X aria-hidden />
+                </button>
+              </div>
+            ))}
+          </div>
+        ) : null}
+
         {showingHistory ? (
           <ChatHistory
             onBack={() => setShowingHistory(false)}

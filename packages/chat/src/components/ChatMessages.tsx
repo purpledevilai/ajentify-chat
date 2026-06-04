@@ -323,3 +323,4 @@ function BouncingDots(): JSX.Element {
     </span>
   );
 }
+

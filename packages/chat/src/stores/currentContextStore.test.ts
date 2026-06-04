@@ -7,23 +7,23 @@ import {
   MockWebSocket,
   setActiveMockServer,
 } from '../ws/MockWebSocket';
-import type { AjentifyEvent } from '../types';
+import type { AjentifyProxyRequest } from '../types';
 
 /**
- * Build a strict mock dispatcher that returns canned values per event type.
- * Lets each test override individual variants.
+ * Build a strict mock proxy handler that returns canned values per request
+ * type. Lets each test override individual variants.
  */
-function makeDispatcher(
-  overrides: Partial<Record<AjentifyEvent['type'], (event: AjentifyEvent) => unknown>> = {}
+function makeProxy(
+  overrides: Partial<Record<AjentifyProxyRequest['type'], (req: AjentifyProxyRequest) => unknown>> = {}
 ) {
-  const defaults: Record<AjentifyEvent['type'], (event: AjentifyEvent) => unknown> = {
+  const defaults: Record<AjentifyProxyRequest['type'], (req: AjentifyProxyRequest) => unknown> = {
     create_context: () => ({
       context_id: 'ctx_new',
       agent_id: 'a1',
       client_id: 'cln_1',
       client_api_key: 'key_xyz',
     }),
-    generate_access_token: () => 'tok_xyz',
+    generate_access_token: () => ({ token: 'tok_xyz' }),
     get_context: () => ({
       context_id: 'ctx_old',
       agent_id: 'a1',
@@ -34,23 +34,23 @@ function makeDispatcher(
     delete_context: () => ({ success: true }),
   };
   const merged = { ...defaults, ...overrides };
-  return vi.fn((event: AjentifyEvent) => merged[event.type](event));
+  return vi.fn((req: AjentifyProxyRequest) => merged[req.type](req));
 }
 
 interface Setup {
   current: ReturnType<typeof createCurrentContextStore>;
   contexts: ReturnType<typeof createContextsStore>;
-  dispatcher: ReturnType<typeof makeDispatcher>;
+  proxy: ReturnType<typeof makeProxy>;
   server: ReturnType<typeof createMockServer>;
 }
 
 function setupStores(opts: {
   agentSpeaksFirst?: boolean;
-  dispatcher?: ReturnType<typeof makeDispatcher>;
+  proxy?: ReturnType<typeof makeProxy>;
 } = {}): Setup {
-  const dispatcher = opts.dispatcher ?? makeDispatcher();
+  const proxy = opts.proxy ?? makeProxy();
   const server = createMockServer();
-  const contexts = createContextsStore({ onEvent: dispatcher, storage: null });
+  const contexts = createContextsStore({ onProxy: proxy, storage: null });
   const clientSideTools = createClientSideToolsStore();
   const current = createCurrentContextStore({
     contextsStore: contexts,
@@ -59,7 +59,7 @@ function setupStores(opts: {
     agentSpeaksFirst: opts.agentSpeaksFirst,
     reconnect: { maxAttempts: 0 },
   });
-  return { current, contexts, dispatcher, server };
+  return { current, contexts, proxy, server };
 }
 
 /**
@@ -97,11 +97,11 @@ describe('currentContextStore', () => {
 
   describe('startNewContext (default lazy / draft mode)', () => {
     it('enters a draft state and never dispatches create_context', async () => {
-      const { current, dispatcher } = setupStores();
+      const { current, proxy } = setupStores();
 
       await current.getState().startNewContext();
 
-      expect(dispatcher).not.toHaveBeenCalled();
+      expect(proxy).not.toHaveBeenCalled();
       expect(current.getState().isDraft).toBe(true);
       expect(current.getState().status).toBe('draft');
       expect(current.getState().contextId).toBeNull();
@@ -122,7 +122,7 @@ describe('currentContextStore', () => {
     });
 
     it('is idempotent: a second call on a fresh draft does not reset state', async () => {
-      const { current, dispatcher } = setupStores();
+      const { current, proxy } = setupStores();
 
       await current.getState().startNewContext({ user_defined: { v: 1 } });
       const firstSnapshot = current.getState().draftRequest;
@@ -130,21 +130,21 @@ describe('currentContextStore', () => {
       await current.getState().startNewContext({ user_defined: { v: 2 } });
 
       // No backend dispatch and the original draft request is preserved.
-      expect(dispatcher).not.toHaveBeenCalled();
+      expect(proxy).not.toHaveBeenCalled();
       expect(current.getState().draftRequest).toBe(firstSnapshot);
     });
   });
 
   describe('startNewContext with agentSpeaksFirst', () => {
     it('eagerly dispatches create_context and connects the WebSocket', async () => {
-      const { current, dispatcher, server } = setupStores({
+      const { current, proxy, server } = setupStores({
         agentSpeaksFirst: true,
       });
       autoRespond(server);
 
       await current.getState().startNewContext();
 
-      expect(dispatcher).toHaveBeenCalledWith({
+      expect(proxy).toHaveBeenCalledWith({
         type: 'create_context',
         request: undefined,
       });
@@ -159,19 +159,19 @@ describe('currentContextStore', () => {
     });
 
     it('is idempotent on an already-connected empty chat', async () => {
-      const { current, dispatcher, server } = setupStores({
+      const { current, proxy, server } = setupStores({
         agentSpeaksFirst: true,
       });
       autoRespond(server);
 
       await current.getState().startNewContext();
-      const firstCallCount = dispatcher.mock.calls.length;
+      const firstCallCount = proxy.mock.calls.length;
 
       // Spam the button — should be a no-op.
       await current.getState().startNewContext();
       await current.getState().startNewContext();
 
-      expect(dispatcher.mock.calls.length).toBe(firstCallCount);
+      expect(proxy.mock.calls.length).toBe(firstCallCount);
 
       current.getState().disconnect();
     });
@@ -208,7 +208,7 @@ describe('currentContextStore', () => {
 
   describe('sendMessage on a draft', () => {
     it('materializes the draft (create_context -> connect -> add_message) on first send', async () => {
-      const { current, contexts, dispatcher, server } = setupStores();
+      const { current, contexts, proxy, server } = setupStores();
       autoRespond(server);
 
       await current.getState().startNewContext({ user_defined: { v: 1 } });
@@ -229,7 +229,7 @@ describe('currentContextStore', () => {
       await sendPromise;
 
       // create_context must have been dispatched with the stashed request.
-      expect(dispatcher).toHaveBeenCalledWith({
+      expect(proxy).toHaveBeenCalledWith({
         type: 'create_context',
         request: { user_defined: { v: 1 } },
       });
@@ -251,12 +251,12 @@ describe('currentContextStore', () => {
     });
 
     it('rolls into an error state if create_context rejects', async () => {
-      const dispatcher = makeDispatcher({
+      const proxy = makeProxy({
         create_context: () => {
           throw new Error('backend rejected');
         },
       });
-      const { current, server } = setupStores({ dispatcher });
+      const { current, server } = setupStores({ proxy });
       autoRespond(server);
 
       await current.getState().startNewContext();

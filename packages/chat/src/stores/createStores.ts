@@ -12,13 +12,13 @@ import {
 } from './clientSideToolsStore';
 import { createPanelStore } from './panelStore';
 import type { AjentifyStores } from './types';
-import type { AjentifyEventHandler } from '../types';
+import type { AjentifyProxyHandler } from '../types';
 
 export type { OnToolCallCallback };
 
 export interface CreateStoresOptions {
-  /** Single dispatcher routing every backend request through one handler. */
-  onAjentifyEvent: AjentifyEventHandler;
+  /** Single handler forwarding every backend request through the proxy. */
+  onAjentifyProxyRequest: AjentifyProxyHandler;
   websocketUrl?: string;
   storage?: ContextsStoreOptions['storage'];
   storageKey?: string;
@@ -41,7 +41,7 @@ export interface CreateStoresOptions {
  */
 export function createStores(options: CreateStoresOptions): AjentifyStores {
   const contexts = createContextsStore({
-    onEvent: options.onAjentifyEvent,
+    onProxy: options.onAjentifyProxyRequest,
     storage: options.storage,
     storageKey: options.storageKey,
   });

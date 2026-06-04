@@ -27,12 +27,7 @@ export {
   type TokenStreamingEvents,
 } from './ws/TokenStreamingClient';
 
-// DX helpers (v0.2) — every Ajentify integration ends up writing these,
-// so we ship the canonical versions.
-export {
-  createAjentifyEventClient,
-  type AjentifyEventClientOptions,
-} from './lib/eventClient';
+// DX helpers
 export {
   defineClientSideTools,
   type ToolSchema,

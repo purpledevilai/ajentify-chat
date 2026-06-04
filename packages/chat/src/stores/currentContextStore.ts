@@ -119,6 +119,9 @@ export interface CurrentContextStore {
   /** Disconnect and clear chat state. */
   disconnect: () => void;
 
+  /** Dismiss the current error (resets `error` to null and `status` to the appropriate idle state). */
+  clearError: () => void;
+
   /** Wipe everything (used by "new chat"). */
   clear: () => void;
 }
@@ -585,6 +588,14 @@ export function createCurrentContextStore(options: CurrentContextStoreOptions) {
         emitError(e);
         throw e;
       }
+    },
+
+    clearError() {
+      if (get().error === null) return;
+      const nextStatus = get().contextId
+        ? (wsClient?.isOpen ? 'connected' : 'disconnected')
+        : (get().isDraft ? 'draft' : 'idle');
+      set({ error: null, status: nextStatus });
     },
 
     disconnect() {

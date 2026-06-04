@@ -1,9 +1,9 @@
 import { createStore } from 'zustand/vanilla';
 import {
   AjentifyError,
-  type AjentifyEvent,
-  type AjentifyEventHandler,
-  type AjentifyEventResult,
+  type AjentifyProxyRequest,
+  type AjentifyProxyHandler,
+  type AjentifyProxyResult,
   type CreateContextRequest,
   type CreateContextResponse,
   type FilteredContext,
@@ -15,9 +15,10 @@ export interface ContextsStoreOptions {
   /**
    * The single handler the developer provides on `<AjentifyProvider>`. Every
    * backend request the SDK makes is dispatched through this function as a
-   * tagged `AjentifyEvent`. See the type's JSDoc for the per-variant contract.
+   * tagged `AjentifyProxyRequest`. The handler should forward to the dev's
+   * backend proxy and return Ajentify API responses unchanged.
    */
-  onEvent: AjentifyEventHandler;
+  onProxy: AjentifyProxyHandler;
   storage?: Storage | null;
   storageKey?: string;
 }
@@ -132,24 +133,24 @@ function writePersisted(
 }
 
 /**
- * Type-narrowing wrapper around the dev's `onEvent` handler. Awaits sync or
- * async returns and casts the result to whatever the caller's event variant
+ * Type-narrowing wrapper around the dev's proxy handler. Awaits sync or
+ * async returns and casts the result to whatever the caller's request variant
  * is supposed to resolve with.
  */
-async function dispatch<E extends AjentifyEvent>(
-  onEvent: AjentifyEventHandler,
-  event: E
-): Promise<AjentifyEventResult<E>> {
-  return (await onEvent(event)) as AjentifyEventResult<E>;
+async function dispatch<R extends AjentifyProxyRequest>(
+  onProxy: AjentifyProxyHandler,
+  request: R
+): Promise<AjentifyProxyResult<R>> {
+  return (await onProxy(request)) as AjentifyProxyResult<R>;
 }
 
 // ---- Per-variant resolve-shape validation -------------------------------
 //
 // Every variant has a documented expected return shape (see the JSDoc on
-// `AjentifyEvent`). When the dev's `onAjentifyEvent` resolves with something
-// else — usually because they forgot to unwrap a backend envelope — we
+// `AjentifyProxyRequest`). When the dev's proxy resolves with something
+// unexpected — usually because the response was wrapped differently — we
 // can't actually use the value, so the SDK was rejecting later with a
-// generic "callback failed" message that hid the real bug. v0.2 surfaces
+// generic "callback failed" message that hid the real bug. We surface
 // the bug at the dispatch site with a hint about the expected shape.
 
 function isPlainObject(v: unknown): v is Record<string, unknown> {
@@ -183,6 +184,19 @@ function validateCreateContext(raw: unknown): CreateContextResponse {
   }
   return raw as unknown as CreateContextResponse;
 }
+function extractAccessToken(raw: unknown): string {
+  if (typeof raw === 'string' && raw.length > 0) return raw;
+  if (isPlainObject(raw) && typeof raw.token === 'string' && raw.token.length > 0) {
+    return raw.token;
+  }
+  throw new AjentifyError(
+    `'generate_access_token' proxy resolved with ${describeShape(raw)} ` +
+      `but expected '{ token: string }' (the upstream /generate-api-key response). ` +
+      `Make sure your proxy returns the Ajentify response unchanged.`,
+    'callback',
+  );
+}
+
 function validateGetContext(raw: unknown): FilteredContext {
   if (!isPlainObject(raw) || typeof raw.context_id !== 'string') {
     throw new AjentifyError(
@@ -256,7 +270,7 @@ export function createContextsStore(options: ContextsStoreOptions) {
     createContext: async (req) => {
       set({ creating: true, createError: null });
       try {
-        const rawCreated = await dispatch(options.onEvent, {
+        const rawCreated = await dispatch(options.onProxy, {
           type: 'create_context',
           request: req,
         });
@@ -296,19 +310,10 @@ export function createContextsStore(options: ContextsStoreOptions) {
 
     generateAccessToken: async () => {
       try {
-        const raw = await dispatch(options.onEvent, {
+        const raw = await dispatch(options.onProxy, {
           type: 'generate_access_token',
         });
-        if (typeof raw !== 'string' || raw.length === 0) {
-          throw new AjentifyError(
-            `'generate_access_token' callback resolved with ${describeShape(raw)} ` +
-              `but expected a non-empty string. ` +
-              `Did you forget to unwrap '{ token }' from the upstream ` +
-              `/generate-api-key response?`,
-            'callback',
-          );
-        }
-        const token = raw;
+        const token = extractAccessToken(raw);
         // Persist alongside contextId so a refresh keeps continuity.
         set({ accessToken: token });
         writePersisted(storage, storageKey, {
@@ -329,7 +334,7 @@ export function createContextsStore(options: ContextsStoreOptions) {
 
     loadContext: async (contextId) => {
       try {
-        const raw = await dispatch(options.onEvent, {
+        const raw = await dispatch(options.onProxy, {
           type: 'get_context',
           contextId,
         });
@@ -349,7 +354,7 @@ export function createContextsStore(options: ContextsStoreOptions) {
       set({ historyLoading: true, historyError: null });
       inFlightHistoryLoad = (async () => {
         try {
-          const raw = await dispatch(options.onEvent, {
+          const raw = await dispatch(options.onProxy, {
             type: 'get_context_history',
           });
           const list = validateGetContextHistory(raw);
@@ -383,7 +388,7 @@ export function createContextsStore(options: ContextsStoreOptions) {
 
     deleteContext: async (contextId) => {
       try {
-        await dispatch(options.onEvent, { type: 'delete_context', contextId });
+        await dispatch(options.onProxy, { type: 'delete_context', contextId });
       } catch (err) {
         if (err instanceof AjentifyError) throw err;
         throw new AjentifyError(

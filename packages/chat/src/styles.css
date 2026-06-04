@@ -69,8 +69,16 @@
   --aj-input-margin: 0.75rem;
   --aj-input-radius: 1rem;
 
-  --aj-header-padding-x: 0.75rem;
-  --aj-header-padding-y: 0.5rem;
+  --aj-header-padding-x: 1rem;
+  --aj-header-padding-y: 0.625rem;
+
+  /* Subtle interactive surface fills used for ghost-button hover, history
+   * row hover, and the "currently active" highlight. Default to a
+   * foreground-tinted mix so they stay neutral regardless of the host's
+   * brand `--aj-primary` / `--aj-accent` values. Override per-theme if
+   * you want a more colored treatment. */
+  --aj-surface-hover: color-mix(in oklab, var(--aj-foreground) 7%, transparent);
+  --aj-surface-active: color-mix(in oklab, var(--aj-foreground) 12%, transparent);
 
   --aj-prose-font-size: 0.9375rem;
   --aj-prose-line-height: 1.55;
@@ -120,34 +128,53 @@
 }
 
 /* ============================================================
- * Root wrapper — sets font, color, bg for the in-tree chat content.
- * Portaled overlays inherit only the tokens (from :root), so they
- * re-declare bg/color in their own rules below.
+ * Surface cosmetics.
+ *
+ * `.aj-root` is the inline-mode flex wrapper that lives around both the
+ * chat panel AND the host's own page content (`.aj-panel-host-body`).
+ * It is deliberately cosmetics-free — no font, color, background, box-
+ * sizing, or button resets — so we never bleed chat styling into the
+ * consumer's UI.
+ *
+ * The actual chat *surfaces* — the docked panel (`.aj-panel-chat`), the
+ * portaled overlays (`.aj-portal`), and the standalone toggle button
+ * (`.aj-chat-toggle`) — opt in to the chat's font/color/background/etc.
+ * Anything they wrap is the chat's own DOM, so the cascade is safe.
  * ============================================================ */
-.aj-root {
+
+.aj-panel-chat,
+.aj-sheet-content,
+.aj-chat-toggle {
   color: var(--aj-foreground);
-  background-color: var(--aj-background);
   font-family: var(--aj-font-sans);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
-  /* Bias children to inherit color/font instead of leaking host defaults. */
 }
 
-.aj-root,
-.aj-root *,
-.aj-root *::before,
-.aj-root *::after,
-.aj-portal,
-.aj-portal *,
-.aj-portal *::before,
-.aj-portal *::after {
+.aj-panel-chat,
+.aj-sheet-content {
+  background-color: var(--aj-background);
+}
+
+.aj-panel-chat,
+.aj-panel-chat *,
+.aj-panel-chat *::before,
+.aj-panel-chat *::after,
+.aj-sheet-content,
+.aj-sheet-content *,
+.aj-sheet-content *::before,
+.aj-sheet-content *::after {
   box-sizing: border-box;
 }
 
 /* Buttons: many hosts ship aggressive `button { all: unset }` styles. We
- * proactively reset our own buttons so we don't rely on UA defaults. */
-.aj-root button {
+ * proactively reset our own buttons so we don't rely on UA defaults. The
+ * reset is scoped to chat surfaces only — host buttons (Shadcn, MUI, etc.)
+ * inside `.aj-panel-host-body` are untouched. */
+.aj-panel-chat button,
+.aj-sheet-content button,
+.aj-chat-toggle {
   background: none;
   border: 0;
   padding: 0;
@@ -190,7 +217,7 @@
 }
 @keyframes aj-dot-bounce {
   0%, 80%, 100% { transform: translateY(0); opacity: 0.4; }
-  40%           { transform: translateY(-3px); opacity: 1; }
+  40%           { transform: translateY(-4px); opacity: 1; }
 }
 @keyframes aj-spin {
   to { transform: rotate(360deg); }
@@ -245,8 +272,8 @@
   color: inherit;
 }
 .aj-button--ghost:hover {
-  background-color: var(--aj-accent);
-  color: var(--aj-accent-foreground);
+  background-color: var(--aj-surface-hover);
+  color: inherit;
 }
 
 .aj-button--outline {
@@ -255,8 +282,8 @@
   color: inherit;
 }
 .aj-button--outline:hover {
-  background-color: var(--aj-accent);
-  color: var(--aj-accent-foreground);
+  background-color: var(--aj-surface-hover);
+  color: inherit;
 }
 
 .aj-button--destructive {
@@ -534,8 +561,8 @@
   cursor: pointer;
 }
 .aj-newchat-prompt:hover {
-  background-color: var(--aj-accent);
-  color: var(--aj-accent-foreground);
+  background-color: var(--aj-surface-hover);
+  color: inherit;
   border-color: color-mix(in oklab, var(--aj-border) 60%, var(--aj-foreground) 40%);
 }
 
@@ -574,6 +601,7 @@
   border-bottom-left-radius: var(--aj-bubble-tail-radius);
   display: inline-flex;
   align-items: center;
+  padding: 1rem var(--aj-bubble-padding-x);
 }
 .aj-message-bubble--system {
   border: 1px dashed var(--aj-border);
@@ -727,6 +755,74 @@
 }
 
 /* ============================================================
+ * Error toast (floating overlay inside .aj-view-body)
+ * ============================================================ */
+@keyframes aj-toast-in {
+  from { transform: translateY(-100%); opacity: 0; }
+  to   { transform: translateY(0);     opacity: 1; }
+}
+
+.aj-toast-container {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+  padding: 0.625rem 0.75rem;
+  pointer-events: none;
+}
+.aj-toast {
+  pointer-events: auto;
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  padding: 0.625rem 0.75rem;
+  border-radius: calc(var(--aj-radius) - 0.25rem);
+  border: 1px solid color-mix(in oklab, var(--aj-destructive) 35%, transparent);
+  background-color: var(--aj-background);
+  color: var(--aj-destructive);
+  font-size: 0.8125rem;
+  line-height: 1.45;
+  box-shadow: 0 4px 12px rgb(0 0 0 / 0.12), 0 1px 3px rgb(0 0 0 / 0.06);
+  animation: aj-toast-in 220ms ease-out;
+}
+.aj-toast-icon {
+  width: 1rem;
+  height: 1rem;
+  flex-shrink: 0;
+  margin-top: 0.1rem;
+}
+.aj-toast-text {
+  flex: 1 1 auto;
+  margin: 0;
+  min-width: 0;
+  word-break: break-word;
+}
+.aj-toast-dismiss {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.25rem;
+  height: 1.25rem;
+  border-radius: 9999px;
+  color: var(--aj-destructive);
+  opacity: 0.6;
+  transition: opacity 120ms, background-color 120ms;
+}
+.aj-toast-dismiss:hover {
+  opacity: 1;
+  background-color: color-mix(in oklab, var(--aj-destructive) 12%, transparent);
+}
+.aj-toast-dismiss svg {
+  width: 0.75rem;
+  height: 0.75rem;
+}
+
+/* ============================================================
  * ChatInput
  * ============================================================ */
 .aj-input-dock {
@@ -736,7 +832,7 @@
 }
 .aj-input {
   display: flex;
-  align-items: flex-end;
+  align-items: center;
   gap: 0.5rem;
   background-color: var(--aj-card);
   border: 1px solid var(--aj-border);
@@ -744,6 +840,7 @@
   padding: var(--aj-input-padding-y) var(--aj-input-padding-x);
   box-shadow: 0 1px 2px rgb(0 0 0 / 0.04);
   transition: border-color 120ms, box-shadow 120ms;
+  cursor: text;
 }
 .aj-input:focus-within {
   border-color: color-mix(in oklab, var(--aj-ring) 60%, var(--aj-border));
@@ -757,6 +854,7 @@
   border: 0;
   background: transparent;
   padding: 0;
+  margin: auto 0;
   font-size: 0.9375rem;
   line-height: 1.5;
   color: inherit;
@@ -765,21 +863,25 @@
 .aj-input-textarea:focus { outline: none; }
 .aj-input-textarea::placeholder { color: var(--aj-muted-foreground); }
 .aj-input-send {
+  flex-shrink: 0;
+  align-self: flex-end;
   height: 2rem;
   width: 2rem;
   border-radius: 9999px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  background-color: var(--aj-primary);
-  color: var(--aj-primary-foreground);
+  background-color: transparent;
+  color: var(--aj-foreground);
+  cursor: pointer;
   transition: background-color 120ms, opacity 120ms;
 }
 .aj-input-send:hover:not(:disabled) {
-  background-color: color-mix(in oklab, var(--aj-primary) 90%, transparent);
+  background-color: var(--aj-surface-hover);
 }
 .aj-input-send:disabled {
   opacity: 0.4;
+  cursor: default;
   pointer-events: none;
 }
 .aj-input-send svg { width: 1rem; height: 1rem; }
@@ -812,20 +914,28 @@
   flex: 1 1 auto;
   overflow-y: auto;
   margin: 0;
-  padding: 0;
+  padding: 0.5rem 0;
   list-style: none;
 }
-.aj-history-list > li { position: relative; border-bottom: 1px solid var(--aj-border); }
-.aj-history-list > li:last-child { border-bottom: none; }
+/* Each row is a flex container: the clickable item fills the available
+ * space, the delete button sits inline next to it. Rows are inset from
+ * the panel edges with side margins so they read as discrete cards. */
+.aj-history-list > li {
+  display: flex;
+  align-items: stretch;
+  margin: 0.125rem 0.5rem;
+}
 
 .aj-history-item {
+  flex: 1 1 auto;
+  min-width: 0;
   display: flex;
   flex-direction: column;
-  width: 100%;
   align-items: flex-start;
   gap: 0.25rem;
   text-align: left;
-  padding: 0.75rem 3rem 0.75rem 1rem;
+  padding: 0.75rem 0.875rem;
+  border-radius: 0.5rem;
   background: transparent;
   border: 0;
   cursor: pointer;
@@ -833,10 +943,10 @@
   color: inherit;
 }
 .aj-history-item:hover {
-  background-color: color-mix(in oklab, var(--aj-accent) 60%, transparent);
+  background-color: var(--aj-surface-hover);
 }
 .aj-history-item--current {
-  background-color: color-mix(in oklab, var(--aj-accent) 40%, transparent);
+  background-color: var(--aj-surface-active);
 }
 .aj-history-item-row {
   display: flex;
@@ -844,8 +954,11 @@
   align-items: center;
   justify-content: space-between;
   gap: 0.5rem;
+  min-width: 0;
 }
 .aj-history-item-name {
+  flex: 1 1 auto;
+  min-width: 0;
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
@@ -858,18 +971,22 @@
   color: var(--aj-muted-foreground);
 }
 .aj-history-item-preview {
+  width: 100%;
   font-size: 0.75rem;
   color: var(--aj-muted-foreground);
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
+  word-break: break-word;
 }
+/* Inline next to the clickable item — no longer absolute-positioned, so
+ * the item's text content gets its full width without overlapping. */
 .aj-history-delete {
-  position: absolute;
-  right: 0.5rem;
-  top: 50%;
-  transform: translateY(-50%);
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  padding-left: 0.25rem;
 }
 .aj-history-delete .aj-button {
   opacity: 0.6;
@@ -925,8 +1042,8 @@
   transition: background-color 120ms, border-color 120ms;
 }
 .aj-chat-toggle:hover {
-  background-color: var(--aj-accent);
-  color: var(--aj-accent-foreground);
+  background-color: var(--aj-surface-hover);
+  color: inherit;
 }
 .aj-chat-toggle--icon {
   width: 2.25rem;

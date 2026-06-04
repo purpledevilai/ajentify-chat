@@ -10,7 +10,7 @@ import type { AjentifyStores } from '../stores/types';
 import type {
   AgentEvent,
   AjentifyError,
-  AjentifyEventHandler,
+  AjentifyProxyHandler,
 } from '../types';
 import { createSafeStorage } from '../lib/utils';
 import { injectChatStyles } from '../lib/injectStyles';
@@ -25,16 +25,30 @@ export type StorageOption =
 
 export interface AjentifyConfig {
   /**
-   * Single async handler that services every backend request the SDK makes
-   * (create context, fetch context, mint access tokens, list history, delete
-   * context). The dev's backend should expose **one** endpoint that routes
-   * on `event.type` and proxies to the Ajentify REST API with their org
-   * API key. See `AjentifyEvent` for the variant contract.
+   * The network integration point. Write a function that sends each
+   * `AjentifyProxyRequest` to your backend using `fetch` (or any HTTP
+   * client). You control the URL, method, headers, credentials, and
+   * error handling — this is where your auth lives.
    *
-   * Use `createAjentifyEventClient({ url: '/api/ajentify-event' })` from
-   * `@ajentify/chat` to skip the boilerplate.
+   * Your backend authenticates the caller, resolves the `client_id`,
+   * and proxies each request to the Ajentify REST API with the org API
+   * key. Return the Ajentify response unchanged — the SDK handles any
+   * internal unwrapping.
+   *
+   * ```ts
+   * async function onAjentifyProxyRequest(request: AjentifyProxyRequest) {
+   *   const res = await fetch('/api/ajentify/proxy', {
+   *     method: 'POST',
+   *     credentials: 'include',
+   *     headers: { 'content-type': 'application/json' },
+   *     body: JSON.stringify(request),
+   *   });
+   *   if (!res.ok) throw new Error(`Proxy error: ${res.status}`);
+   *   return res.json();
+   * }
+   * ```
    */
-  onAjentifyEvent: AjentifyEventHandler;
+  onAjentifyProxyRequest: AjentifyProxyHandler;
   /** Override the token streaming WebSocket URL. */
   websocketUrl?: string;
   /**
@@ -244,7 +258,7 @@ export function AjentifyProvider({ config, children }: AjentifyProviderProps): J
       // Always read through the latest config ref so dev callbacks can change
       // their closure (e.g. router/auth) across renders without us rebuilding
       // the stores or losing the WebSocket.
-      onAjentifyEvent: (event) => configRef.current.onAjentifyEvent(event),
+      onAjentifyProxyRequest: (request) => configRef.current.onAjentifyProxyRequest(request),
       storage: resolveStorage(config.storage),
       storageKey: config.storageKey,
       WebSocketImpl: config.WebSocketImpl,

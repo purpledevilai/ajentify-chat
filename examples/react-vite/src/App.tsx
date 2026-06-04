@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Link, NavLink, Route, Routes, useNavigate } from 'react-router-dom';
 import { AjentifyProvider } from '@ajentify/chat';
 import { ChatPanel } from '@ajentify/chat/ui';
-import { ajentifyEvent } from './api';
+import { onAjentifyProxyRequest } from './api';
 import { OrdersPage } from './pages/OrdersPage';
 import { ProfilePage } from './pages/ProfilePage';
 import { HomePage } from './pages/HomePage';
@@ -44,11 +44,35 @@ export default function App() {
   return (
     <AjentifyProvider
       config={{
-        onAjentifyEvent: ajentifyEvent,
+        onAjentifyProxyRequest,
         clientSideTools,
         onError: (err) => {
           console.error('[ajentify]', err);
         },
+        // themeBridge: {
+        //   tokens: {
+        //     background: '--app-background',
+        //     foreground: '--app-foreground',
+        //     card: '--app-card',
+        //     'card-foreground': '--app-card-foreground',
+        //     popover: '--app-popover',
+        //     'popover-foreground': '--app-popover-foreground',
+        //     primary: '--app-primary',
+        //     'primary-foreground': '--app-primary-foreground',
+        //     secondary: '--app-secondary',
+        //     'secondary-foreground': '--app-secondary-foreground',
+        //     muted: '--app-muted',
+        //     'muted-foreground': '--app-muted-foreground',
+        //     accent: '--app-accent',
+        //     'accent-foreground': '--app-accent-foreground',
+        //     destructive: '--app-destructive',
+        //     'destructive-foreground': '--app-destructive-foreground',
+        //     border: '--app-border',
+        //     input: '--app-input',
+        //     ring: '--app-ring',
+        //     radius: '--app-radius',
+        //   },
+        // },
       }}
     >
       <div className="app">

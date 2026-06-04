@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createContextsStore } from './contextsStore';
-import type { AjentifyEvent } from '../types';
+import type { AjentifyProxyRequest } from '../types';
 
 function memoryStorage(): Storage {
   const map = new Map<string, string>();
@@ -23,20 +23,20 @@ function memoryStorage(): Storage {
 }
 
 /**
- * Build a strict mock dispatcher that returns canned values per event type.
- * Lets each test override individual variants.
+ * Build a strict mock proxy handler that returns canned values per request
+ * type. Lets each test override individual variants.
  */
-function makeDispatcher(
-  overrides: Partial<Record<AjentifyEvent['type'], (event: AjentifyEvent) => unknown>> = {}
+function makeProxy(
+  overrides: Partial<Record<AjentifyProxyRequest['type'], (req: AjentifyProxyRequest) => unknown>> = {}
 ) {
-  const defaults: Record<AjentifyEvent['type'], (event: AjentifyEvent) => unknown> = {
+  const defaults: Record<AjentifyProxyRequest['type'], (req: AjentifyProxyRequest) => unknown> = {
     create_context: () => ({
       context_id: 'ctx_new',
       agent_id: 'a1',
       client_id: 'cln_1',
       client_api_key: null,
     }),
-    generate_access_token: () => 'tok_xyz',
+    generate_access_token: () => ({ token: 'tok_xyz' }),
     get_context: () => ({
       context_id: 'ctx_old',
       agent_id: 'a1',
@@ -47,19 +47,19 @@ function makeDispatcher(
     delete_context: () => ({ success: true }),
   };
   const merged = { ...defaults, ...overrides };
-  return vi.fn((event: AjentifyEvent) => merged[event.type](event));
+  return vi.fn((req: AjentifyProxyRequest) => merged[req.type](req));
 }
 
 describe('contextsStore', () => {
-  let onEvent: ReturnType<typeof makeDispatcher>;
+  let onProxy: ReturnType<typeof makeProxy>;
 
   beforeEach(() => {
-    onEvent = makeDispatcher();
+    onProxy = makeProxy();
   });
 
   it('persists contextId / accessToken on setCurrentContext', () => {
     const storage = memoryStorage();
-    const store = createContextsStore({ onEvent, storage, storageKey: 'k' });
+    const store = createContextsStore({ onProxy, storage, storageKey: 'k' });
     store.getState().setCurrentContext('ctx_1', 'tok_1', 'cln_1');
     expect(JSON.parse(storage.getItem('k')!)).toMatchObject({
       state: { contextId: 'ctx_1', accessToken: 'tok_1', clientId: 'cln_1' },
@@ -75,37 +75,37 @@ describe('contextsStore', () => {
         state: { contextId: 'ctx_persisted', accessToken: 'tt', clientId: 'cln_2' },
       })
     );
-    const store = createContextsStore({ onEvent, storage, storageKey: 'k' });
+    const store = createContextsStore({ onProxy, storage, storageKey: 'k' });
     expect(store.getState().contextId).toBe('ctx_persisted');
     expect(store.getState().accessToken).toBe('tt');
     expect(store.getState().clientId).toBe('cln_2');
   });
 
-  it('createContext dispatches a create_context event and stores returned identifiers', async () => {
+  it('createContext dispatches a create_context request and stores returned identifiers', async () => {
     const storage = memoryStorage();
-    const store = createContextsStore({ onEvent, storage, storageKey: 'k' });
+    const store = createContextsStore({ onProxy, storage, storageKey: 'k' });
     const result = await store.getState().createContext({ user_defined: { foo: 'bar' } });
     expect(result.context_id).toBe('ctx_new');
     expect(store.getState().contextId).toBe('ctx_new');
     expect(store.getState().clientId).toBe('cln_1');
-    expect(onEvent).toHaveBeenCalledWith({
+    expect(onProxy).toHaveBeenCalledWith({
       type: 'create_context',
       request: { user_defined: { foo: 'bar' } },
     });
   });
 
-  it('generateAccessToken dispatches generate_access_token and stores the freshly-minted token', async () => {
+  it('generateAccessToken dispatches generate_access_token and unwraps { token } internally', async () => {
     const storage = memoryStorage();
-    const store = createContextsStore({ onEvent, storage, storageKey: 'k' });
+    const store = createContextsStore({ onProxy, storage, storageKey: 'k' });
     store.getState().setCurrentContext('ctx_1', null, 'cln_1');
     const tok = await store.getState().generateAccessToken();
     expect(tok).toBe('tok_xyz');
     expect(store.getState().accessToken).toBe('tok_xyz');
-    expect(onEvent).toHaveBeenCalledWith({ type: 'generate_access_token' });
+    expect(onProxy).toHaveBeenCalledWith({ type: 'generate_access_token' });
   });
 
   it('loadHistory accepts a bare array as well as { contexts }', async () => {
-    const arrayDispatcher = makeDispatcher({
+    const arrayProxy = makeProxy({
       get_context_history: () => [
         {
           context_id: 'ctx_a',
@@ -116,7 +116,7 @@ describe('contextsStore', () => {
         },
       ],
     });
-    const store = createContextsStore({ onEvent: arrayDispatcher, storage: null });
+    const store = createContextsStore({ onProxy: arrayProxy, storage: null });
     const list = await store.getState().loadHistory();
     expect(list).toHaveLength(1);
     expect(store.getState().historyLoaded).toBe(true);
@@ -124,7 +124,7 @@ describe('contextsStore', () => {
 
   it('deleteContext removes the entry from cached history and clears current if active', async () => {
     const storage = memoryStorage();
-    const dispatcher = makeDispatcher({
+    const proxy = makeProxy({
       get_context_history: () => ({
         contexts: [
           {
@@ -144,13 +144,13 @@ describe('contextsStore', () => {
         ],
       }),
     });
-    const store = createContextsStore({ onEvent: dispatcher, storage, storageKey: 'k' });
+    const store = createContextsStore({ onProxy: proxy, storage, storageKey: 'k' });
     await store.getState().loadHistory();
     store.getState().setCurrentContext('ctx_a', 'tok', 'cln_1');
 
     await store.getState().deleteContext('ctx_a');
 
-    expect(dispatcher).toHaveBeenCalledWith({
+    expect(proxy).toHaveBeenCalledWith({
       type: 'delete_context',
       contextId: 'ctx_a',
     });
@@ -160,7 +160,7 @@ describe('contextsStore', () => {
   });
 
   it('deleteContext leaves a non-active context selected when something else is current', async () => {
-    const dispatcher = makeDispatcher({
+    const proxy = makeProxy({
       get_context_history: () => ({
         contexts: [
           {
@@ -180,7 +180,7 @@ describe('contextsStore', () => {
         ],
       }),
     });
-    const store = createContextsStore({ onEvent: dispatcher, storage: null });
+    const store = createContextsStore({ onProxy: proxy, storage: null });
     await store.getState().loadHistory();
     store.getState().setCurrentContext('ctx_a', 'tok', 'cln_1');
 

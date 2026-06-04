@@ -120,24 +120,24 @@ async function ajentifyFetch<T = unknown>(
   return payload as T;
 }
 
-// --------- event router ---------
+// --------- proxy handler ---------
 
 /**
- * The shape mirrors `AjentifyEvent` from `@ajentify/chat`. We re-declare it
- * here so the example backend can stay decoupled from the SDK package.
+ * The shape mirrors `AjentifyProxyRequest` from `@ajentify/chat`. We
+ * re-declare it here so the example backend can stay decoupled from the SDK.
  */
-type AjentifyEvent =
+type AjentifyProxyRequest =
   | { type: 'create_context'; request?: Record<string, unknown> }
   | { type: 'generate_access_token' }
   | { type: 'get_context'; contextId: string }
   | { type: 'get_context_history' }
   | { type: 'delete_context'; contextId: string };
 
-async function routeAjentifyEvent(
-  event: AjentifyEvent,
+async function handleProxyRequest(
+  request: AjentifyProxyRequest,
   user: UserRecord
 ): Promise<unknown> {
-  switch (event.type) {
+  switch (request.type) {
     case 'create_context': {
       const created = await ajentifyFetch<{
         context_id: string;
@@ -148,7 +148,7 @@ async function routeAjentifyEvent(
         method: 'POST',
         body: {
           agent_id: AGENT_ID,
-          ...(event.request ?? {}),
+          ...(request.request ?? {}),
           client_id: user.clientId ?? undefined,
         },
       });
@@ -167,22 +167,18 @@ async function routeAjentifyEvent(
         (err as Error & { status?: number }).status = 409;
         throw err;
       }
-      const minted = await ajentifyFetch<{ token: string; [k: string]: unknown }>(
-        '/generate-api-key',
-        {
-          method: 'POST',
-          body: {
-            org_id: ORG_ID,
-            type: 'client',
-            client_id: user.clientId,
-          },
-        }
-      );
-      return minted;
+      return ajentifyFetch('/generate-api-key', {
+        method: 'POST',
+        body: {
+          org_id: ORG_ID,
+          type: 'client',
+          client_id: user.clientId,
+        },
+      });
     }
 
     case 'get_context': {
-      return ajentifyFetch(`/context/${event.contextId}`);
+      return ajentifyFetch(`/context/${request.contextId}`);
     }
 
     case 'get_context_history': {
@@ -193,15 +189,13 @@ async function routeAjentifyEvent(
     }
 
     case 'delete_context': {
-      // `DELETE /context/{id}` is a non-public endpoint; using the org API
-      // key is the whole point of routing this through the dev's backend.
-      await ajentifyFetch(`/context/${event.contextId}`, { method: 'DELETE' });
+      await ajentifyFetch(`/context/${request.contextId}`, { method: 'DELETE' });
       return { success: true };
     }
 
     default: {
-      const exhaustive: never = event;
-      throw new Error(`unsupported event: ${JSON.stringify(exhaustive)}`);
+      const exhaustive: never = request;
+      throw new Error(`unsupported proxy request: ${JSON.stringify(exhaustive)}`);
     }
   }
 }
@@ -217,21 +211,22 @@ app.get('/health', (_req, res) => {
 });
 
 /**
- * POST /api/ajentify/event
+ * POST /api/ajentify/proxy
  *
  * Single endpoint the chat SDK posts every backend request to. The body is
- * an `AjentifyEvent`; we route on `event.type` and proxy to the matching
- * Ajentify REST endpoint with the org API key.
+ * an `AjentifyProxyRequest`; we route on `request.type` and proxy to the
+ * matching Ajentify REST endpoint with the org API key. Responses are
+ * returned unchanged — the SDK handles any unwrapping.
  */
-app.post('/api/ajentify/event', async (req, res) => {
-  const event = req.body as AjentifyEvent | undefined;
-  if (!event || typeof event !== 'object' || !('type' in event)) {
-    res.status(400).json({ error: 'Body must be an AjentifyEvent { type, ... }' });
+app.post('/api/ajentify/proxy', async (req, res) => {
+  const request = req.body as AjentifyProxyRequest | undefined;
+  if (!request || typeof request !== 'object' || !('type' in request)) {
+    res.status(400).json({ error: 'Body must be an AjentifyProxyRequest { type, ... }' });
     return;
   }
   const user = getOrCreateUser(req, res);
   try {
-    const result = await routeAjentifyEvent(event, user);
+    const result = await handleProxyRequest(request, user);
     res.json(result);
   } catch (err) {
     const status = (err as { status?: number }).status ?? 500;

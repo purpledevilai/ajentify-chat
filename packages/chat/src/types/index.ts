@@ -196,30 +196,31 @@ export interface HistoryContext {
   agent: HistoryAgent;
 }
 
-// ---------- Ajentify SDK events (consolidated callback) ----------
+// ---------- Ajentify proxy (consolidated callback) ----------
 
 /**
- * The discriminated union of every request the SDK sends to the developer's
- * backend. Instead of providing four separate callbacks, the developer
- * implements **one** `onAjentifyEvent` handler and routes on `event.type`:
+ * The discriminated union of every request the SDK sends through the
+ * developer's `onAjentifyProxyRequest` handler. The developer writes a
+ * single `fetch` call (or equivalent) that POSTs each request to their
+ * own backend. The backend authenticates the caller, resolves the
+ * `client_id`, and proxies to the matching Ajentify REST endpoint with
+ * the org API key. Responses should be returned as-is — the SDK handles
+ * any unwrapping.
  *
  * ```ts
- * const onAjentifyEvent: AjentifyEventHandler = async (event) => {
- *   switch (event.type) {
- *     case 'create_context':       return await api.createContext(event.request);
- *     case 'generate_access_token': return await api.generateAccessToken();
- *     case 'get_context':           return await api.getContext(event.contextId);
- *     case 'get_context_history':   return await api.getContextHistory();
- *     case 'delete_context':        return await api.deleteContext(event.contextId);
- *   }
+ * const onAjentifyProxyRequest = async (request: AjentifyProxyRequest) => {
+ *   const res = await fetch('/api/ajentify/proxy', {
+ *     method: 'POST',
+ *     credentials: 'include',
+ *     headers: { 'content-type': 'application/json' },
+ *     body: JSON.stringify(request),
+ *   });
+ *   if (!res.ok) throw new Error(`Proxy ${request.type} failed: ${res.status}`);
+ *   return res.json();
  * };
  * ```
- *
- * The expected return type for each variant is documented inline below; the
- * SDK will throw an `AjentifyError` (`code: 'callback'`) if the handler
- * resolves with an unexpected shape.
  */
-export type AjentifyEvent =
+export type AjentifyProxyRequest =
   /**
    * Create a brand new context. The dev's backend should call
    * `POST /context` with the org-scoped API key and return the response.
@@ -228,8 +229,9 @@ export type AjentifyEvent =
   | { type: 'create_context'; request?: CreateContextRequest }
   /**
    * Mint a fresh client access token (JWT) for the current user. The dev's
-   * backend should call `POST /generate-api-key`.
-   * Expected resolve type: `string` (the token).
+   * backend should call `POST /generate-api-key` and return the response
+   * unchanged (the SDK extracts `.token` internally).
+   * Expected resolve type: `{ token: string }`.
    */
   | { type: 'generate_access_token' }
   /**
@@ -252,34 +254,34 @@ export type AjentifyEvent =
   | { type: 'delete_context'; contextId: string };
 
 /**
- * Maps each `AjentifyEvent` to the value the handler must resolve with.
- * Useful when a dev wants to write a strongly-typed dispatcher; otherwise
- * `AjentifyEventHandler` already enforces this via overloads.
+ * Maps each proxy request to the value the handler must resolve with.
+ * The proxy should return Ajentify API responses unchanged — the SDK
+ * handles any internal unwrapping (e.g. extracting `.token` from
+ * `generate_access_token`).
  */
-export type AjentifyEventResult<E extends AjentifyEvent> = E extends {
+export type AjentifyProxyResult<R extends AjentifyProxyRequest> = R extends {
   type: 'create_context';
 }
   ? CreateContextResponse
-  : E extends { type: 'generate_access_token' }
-    ? string
-    : E extends { type: 'get_context' }
+  : R extends { type: 'generate_access_token' }
+    ? { token: string } | string
+    : R extends { type: 'get_context' }
       ? FilteredContext
-      : E extends { type: 'get_context_history' }
+      : R extends { type: 'get_context_history' }
         ? HistoryContext[] | { contexts: HistoryContext[] }
-        : E extends { type: 'delete_context' }
+        : R extends { type: 'delete_context' }
           ? void | unknown
           : never;
 
 /**
  * The single function a developer registers on `<AjentifyProvider>` to
- * service every backend request the SDK needs to make. Receives a fully
- * typed discriminated event; should resolve with the matching value (see
- * `AjentifyEventResult` / the JSDoc on each event variant).
- *
- * Returns may be either a `Promise` or a sync value.
+ * service every backend request the SDK needs to make. The developer
+ * controls the HTTP request — method, headers, auth, error handling —
+ * and sends the `AjentifyProxyRequest` to their backend, which proxies
+ * to the Ajentify REST API and returns responses unchanged.
  */
-export type AjentifyEventHandler = (
-  event: AjentifyEvent
+export type AjentifyProxyHandler = (
+  request: AjentifyProxyRequest
 ) => Promise<unknown> | unknown;
 
 // ---------- Errors ----------

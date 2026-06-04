@@ -1,69 +1,69 @@
 /*
- * Plain-CSS theming demo. We define the chat package's `--aj-*` tokens
- * directly (no Tailwind, no themeBridge) and reuse the same variables
- * for the host app's chrome — so toggling `class="dark"` on <html>
- * re-themes both the page and the chat panel in lockstep, live.
+ * Host-app design tokens. The app owns its palette; the Ajentify chat
+ * inherits it via `themeBridge` on AjentifyProvider — no --aj-* overrides
+ * needed here. Toggling `class="dark"` on <html> re-themes both the page
+ * and the chat in lockstep.
  */
 :root {
-  --aj-background: 0 0% 100%;
-  --aj-foreground: 240 10% 4%;
+  --app-background: #faf9f7;
+  --app-foreground: #1a1a2e;
 
-  --aj-card: 0 0% 100%;
-  --aj-card-foreground: 240 10% 4%;
+  --app-card: #ffffff;
+  --app-card-foreground: #1a1a2e;
 
-  --aj-popover: 0 0% 100%;
-  --aj-popover-foreground: 240 10% 4%;
+  --app-popover: #ffffff;
+  --app-popover-foreground: #1a1a2e;
 
-  --aj-primary: 240 6% 10%;
-  --aj-primary-foreground: 0 0% 98%;
+  --app-primary: #4f46e5;
+  --app-primary-foreground: #ffffff;
 
-  --aj-secondary: 240 5% 96%;
-  --aj-secondary-foreground: 240 6% 10%;
+  --app-secondary: #f0eef9;
+  --app-secondary-foreground: #3730a3;
 
-  --aj-muted: 240 5% 96%;
-  --aj-muted-foreground: 240 4% 46%;
+  --app-muted: #f1f0ee;
+  --app-muted-foreground: #6b6b80;
 
-  --aj-accent: 240 5% 96%;
-  --aj-accent-foreground: 240 6% 10%;
+  --app-accent: #eef0ff;
+  --app-accent-foreground: #3730a3;
 
-  --aj-destructive: 0 84% 60%;
-  --aj-destructive-foreground: 0 0% 98%;
+  --app-destructive: #dc2626;
+  --app-destructive-foreground: #ffffff;
 
-  --aj-border: 240 6% 90%;
-  --aj-input: 240 6% 90%;
-  --aj-ring: 240 6% 10%;
+  --app-border: #e2e0dc;
+  --app-input: #e2e0dc;
+  --app-ring: #4f46e5;
 
-  --aj-radius: 0.75rem;
+  --app-radius: 0.625rem;
 }
 
 .dark {
-  --aj-background: 240 10% 4%;
-  --aj-foreground: 0 0% 98%;
+  --app-background: #111118;
+  --app-foreground: #eeeef0;
 
-  --aj-card: 240 10% 6%;
-  --aj-card-foreground: 0 0% 98%;
+  --app-card: #1c1c27;
+  --app-card-foreground: #eeeef0;
 
-  --aj-popover: 240 10% 6%;
-  --aj-popover-foreground: 0 0% 98%;
+  --app-popover: #1c1c27;
+  --app-popover-foreground: #eeeef0;
 
-  --aj-primary: 0 0% 98%;
-  --aj-primary-foreground: 240 6% 10%;
+  --app-primary: #818cf8;
+  --app-primary-foreground: #111118;
 
-  --aj-secondary: 240 4% 16%;
-  --aj-secondary-foreground: 0 0% 98%;
+  --app-secondary: #252536;
+  --app-secondary-foreground: #c7c7f2;
 
-  --aj-muted: 240 4% 16%;
-  --aj-muted-foreground: 240 5% 65%;
+  --app-muted: #252536;
+  --app-muted-foreground: #9191a8;
 
-  --aj-accent: 240 4% 16%;
-  --aj-accent-foreground: 0 0% 98%;
+  --app-accent: #252536;
+  --app-accent-foreground: #c7c7f2;
 
-  --aj-destructive: 0 63% 31%;
-  --aj-destructive-foreground: 0 0% 98%;
+  --app-destructive: #991b1b;
+  --app-destructive-foreground: #fecaca;
 
-  --aj-border: 240 4% 16%;
-  --aj-input: 240 4% 16%;
-  --aj-ring: 240 5% 84%;
+  --app-border: #2d2d3d;
+  --app-input: #2d2d3d;
+  --app-ring: #818cf8;
 }
 
 html,
@@ -74,8 +74,8 @@ body,
   padding: 0;
   font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI',
     Roboto, sans-serif;
-  background: hsl(var(--aj-background));
-  color: hsl(var(--aj-foreground));
+  background: var(--app-background);
+  color: var(--app-foreground);
 }
 
 a {
@@ -98,8 +98,8 @@ button {
   align-items: center;
   justify-content: space-between;
   padding: 12px 20px;
-  border-bottom: 1px solid hsl(var(--aj-border));
-  background: hsl(var(--aj-background) / 0.9);
+  border-bottom: 1px solid var(--app-border);
+  background: color-mix(in srgb, var(--app-background) 90%, transparent);
   position: sticky;
   top: 0;
   z-index: 10;
@@ -118,17 +118,17 @@ button {
 
 .nav a {
   text-decoration: none;
-  color: hsl(var(--aj-muted-foreground));
+  color: var(--app-muted-foreground);
   font-size: 14px;
   transition: color 0.15s ease;
 }
 
 .nav a:hover {
-  color: hsl(var(--aj-foreground));
+  color: var(--app-foreground);
 }
 
 .nav a.active {
-  color: hsl(var(--aj-foreground));
+  color: var(--app-foreground);
   font-weight: 600;
 }
 
@@ -139,10 +139,10 @@ button {
 }
 
 .btn {
-  border: 1px solid hsl(var(--aj-border));
-  background: hsl(var(--aj-card));
-  color: hsl(var(--aj-card-foreground));
-  border-radius: calc(var(--aj-radius) - 2px);
+  border: 1px solid var(--app-border);
+  background: var(--app-card);
+  color: var(--app-card-foreground);
+  border-radius: calc(var(--app-radius) - 2px);
   padding: 6px 12px;
   font-size: 13px;
   cursor: pointer;
@@ -150,8 +150,8 @@ button {
 }
 
 .btn:hover {
-  background: hsl(var(--aj-accent));
-  color: hsl(var(--aj-accent-foreground));
+  background: var(--app-accent);
+  color: var(--app-accent-foreground);
 }
 
 .page {
@@ -164,10 +164,10 @@ button {
 
 .card {
   padding: 24px;
-  background: hsl(var(--aj-card));
-  color: hsl(var(--aj-card-foreground));
-  border: 1px solid hsl(var(--aj-border));
-  border-radius: var(--aj-radius);
+  background: var(--app-card);
+  color: var(--app-card-foreground);
+  border: 1px solid var(--app-border);
+  border-radius: var(--app-radius);
   margin-bottom: 16px;
   box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
 }
@@ -183,21 +183,21 @@ button {
   justify-content: space-between;
   align-items: center;
   padding: 12px 16px;
-  border: 1px solid hsl(var(--aj-border));
-  border-radius: calc(var(--aj-radius) - 4px);
-  background: hsl(var(--aj-card));
-  color: hsl(var(--aj-card-foreground));
+  border: 1px solid var(--app-border);
+  border-radius: calc(var(--app-radius) - 4px);
+  background: var(--app-card);
+  color: var(--app-card-foreground);
   cursor: pointer;
   transition: background-color 0.15s ease, border-color 0.15s ease;
 }
 
 .order-row:hover {
-  background: hsl(var(--aj-accent) / 0.5);
+  background: color-mix(in srgb, var(--app-accent) 50%, transparent);
 }
 
 .order-row.selected {
-  border-color: hsl(var(--aj-primary));
-  box-shadow: 0 0 0 1px hsl(var(--aj-primary));
+  border-color: var(--app-primary);
+  box-shadow: 0 0 0 1px var(--app-primary);
 }
 
 h1 {
@@ -217,5 +217,5 @@ p {
 }
 
 .muted {
-  color: hsl(var(--aj-muted-foreground));
+  color: var(--app-muted-foreground);
 }

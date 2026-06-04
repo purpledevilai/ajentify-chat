@@ -4,7 +4,7 @@ import { createContext, useCallback, useContext, useMemo, useState, type ReactNo
 import { useRouter } from 'next/navigation';
 import { ThemeProvider } from 'next-themes';
 import { AjentifyProvider } from '@ajentify/chat';
-import { ajentifyEvent } from './_lib/api';
+import { onAjentifyProxyRequest } from './_lib/api';
 
 interface ChatPanelControl {
   open: boolean;
@@ -54,7 +54,7 @@ export function Providers({ children }: { children: ReactNode }) {
     <ThemeProvider attribute="class" defaultTheme="light">
       <AjentifyProvider
         config={{
-          onAjentifyEvent: ajentifyEvent,
+          onAjentifyProxyRequest,
           clientSideTools,
           // Hand the chat the host app's shadcn-style design tokens so the
           // panel and the surrounding chrome stay in lockstep — including

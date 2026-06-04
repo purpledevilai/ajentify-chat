@@ -40,6 +40,8 @@ export interface UseChatResult {
   isWaitingForResponse: boolean;
   /** Send a human message. Materializes a draft if needed before sending. */
   send: (text: string) => Promise<void>;
+  /** Dismiss the current error and restore the chat to a usable state. */
+  clearError: () => void;
   /** Disconnect the WebSocket but keep the messages. */
   disconnect: () => void;
 }
@@ -62,6 +64,10 @@ export function useChat(): UseChatResult {
 
   const send = useCallback(
     (text: string) => stores.currentContext.getState().sendMessage(text),
+    [stores]
+  );
+  const clearError = useCallback(
+    () => stores.currentContext.getState().clearError(),
     [stores]
   );
   const disconnect = useCallback(
@@ -95,6 +101,7 @@ export function useChat(): UseChatResult {
     isPreparingNewChat: creating || isDraft,
     isWaitingForResponse,
     send,
+    clearError,
     disconnect,
   };
 }

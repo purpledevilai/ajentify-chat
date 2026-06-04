@@ -103,7 +103,10 @@ export function ChatInput({
   );
 
   return (
-    <div className={cn('aj-input', classNames?.root)}>
+    <div
+      className={cn('aj-input', classNames?.root)}
+      onClick={() => textareaRef.current?.focus()}
+    >
       <textarea
         ref={textareaRef}
         rows={1}
