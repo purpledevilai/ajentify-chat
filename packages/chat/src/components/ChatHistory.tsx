@@ -1,11 +1,10 @@
 'use client';
 
 import * as React from 'react';
-import { ArrowLeft, MessageSquare, Plus, Trash2 } from 'lucide-react';
+import { ArrowLeft, MessageSquare, Trash2 } from 'lucide-react';
 import { useContextHistory } from '../hooks/useContextHistory';
 import { cn } from '../lib/utils';
 import { IconButton } from './primitives/IconButton';
-import { Button } from './primitives/Button';
 
 export interface ChatHistoryClassNames {
   root?: string;
@@ -34,6 +33,25 @@ export interface ChatHistoryProps {
    */
   enableDelete?: boolean;
   classNames?: ChatHistoryClassNames;
+}
+
+function stripMarkdown(text: string): string {
+  return text
+    .replace(/```[\s\S]*?```/g, '')
+    .replace(/`([^`]+)`/g, '$1')
+    .replace(/!\[.*?\]\(.*?\)/g, '')
+    .replace(/\[([^\]]+)\]\(.*?\)/g, '$1')
+    .replace(/^#{1,6}\s+/gm, '')
+    .replace(/(\*\*|__)(.*?)\1/g, '$2')
+    .replace(/(\*|_)(.*?)\1/g, '$2')
+    .replace(/~~(.*?)~~/g, '$1')
+    .replace(/^[-*+]\s+/gm, '')
+    .replace(/^\d+\.\s+/gm, '')
+    .replace(/^>\s+/gm, '')
+    .replace(/^---+$/gm, '')
+    .replace(/\n{2,}/g, ' ')
+    .replace(/\n/g, ' ')
+    .trim();
 }
 
 function formatTimestamp(unixSeconds: number): string {
@@ -104,17 +122,6 @@ export function ChatHistory({
           ) : null}
           <span>Chat history</span>
         </div>
-        <Button
-          variant="secondary"
-          size="sm"
-          onClick={() => {
-            void createNew();
-            onBack?.();
-          }}
-        >
-          <Plus style={{ marginRight: '0.25rem', width: '0.875rem', height: '0.875rem' }} />
-          New chat
-        </Button>
       </div>
 
       {loading && !loaded ? (
@@ -132,18 +139,17 @@ export function ChatHistory({
             const isCurrent = h.context_id === currentContextId;
             const isDeleting = deletingId === h.context_id;
             return (
-              <li key={h.context_id}>
+              <li
+                key={h.context_id}
+                className={cn(isCurrent && 'aj-history-item-current')}
+              >
                 <button
                   type="button"
                   onClick={() => {
                     void switchTo(h.context_id);
                     onBack?.();
                   }}
-                  className={cn(
-                    'aj-history-item',
-                    isCurrent && 'aj-history-item--current',
-                    classNames?.item,
-                  )}
+                  className={cn('aj-history-item', classNames?.item)}
                 >
                   <div className="aj-history-item-row">
                     <span className="aj-history-item-name">
@@ -154,7 +160,7 @@ export function ChatHistory({
                     </span>
                   </div>
                   <span className="aj-history-item-preview">
-                    {h.last_message || '(empty conversation)'}
+                    {h.last_message ? stripMarkdown(h.last_message) : '(empty conversation)'}
                   </span>
                 </button>
                 {enableDelete ? (

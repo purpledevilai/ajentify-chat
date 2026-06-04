@@ -195,6 +195,10 @@ export function ChatView({
           title={title}
           onClose={onClose}
           onShowHistory={() => setShowingHistory(true)}
+          onNewChat={() => {
+            setShowingHistory(false);
+            void createNew();
+          }}
           classNames={classNames?.header}
         />
       ) : null}
