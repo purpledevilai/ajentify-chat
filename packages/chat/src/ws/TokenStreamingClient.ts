@@ -42,6 +42,22 @@ export interface TokenStreamingEvents {
   error: (err: AjentifyError) => void;
   on_token: (params: { token: string; response_id: string }) => void;
   on_stop_token: (params: { response_id: string }) => void;
+  /**
+   * Beta protocol only: a new assistant text segment is starting (fresh
+   * `response_id`). Lets the client split preamble / final text into separate
+   * bubbles.
+   */
+  on_message_start: (params: { response_id: string }) => void;
+  /**
+   * Beta protocol only: the entire turn (all segments + tools + recursion) has
+   * finished. Signals the client to re-enable input.
+   */
+  on_turn_complete: (params: { response_id?: string }) => void;
+  /**
+   * Beta protocol only: the turn failed server-side. Replaces the RPC error
+   * reply that is no longer sent because `add_message` is fire-and-forget.
+   */
+  on_error: (params: { message: string }) => void;
   on_tool_call: (params: {
     tool_call_id: string;
     tool_name: string;
@@ -90,6 +106,14 @@ export interface TokenStreamingClientOptions {
   };
   /** Per-request response timeout in ms. Defaults to 30_000. */
   requestTimeoutMs?: number;
+  /**
+   * Opt into the beta streaming protocol: `connect_to_context` sends
+   * `beta: true`, `add_message` / `client_side_tool_responses` are sent
+   * fire-and-forget (no RPC timeout), and the server emits per-segment
+   * `on_message_start` / `on_stop_token` plus a terminal `on_turn_complete`
+   * (or `on_error`). Defaults to `false`.
+   */
+  beta?: boolean;
   /** Inject a custom WebSocket constructor (useful for tests / Node). */
   WebSocketImpl?: typeof WebSocket;
   /** Optional debug logger. */
@@ -125,7 +149,7 @@ interface PendingRequest {
 export class TokenStreamingClient {
   private readonly url: string;
   private readonly opts: Required<
-    Pick<TokenStreamingClientOptions, 'autoReconnect' | 'requestTimeoutMs'>
+    Pick<TokenStreamingClientOptions, 'autoReconnect' | 'requestTimeoutMs' | 'beta'>
   > & {
     reconnect: Required<NonNullable<TokenStreamingClientOptions['reconnect']>>;
   } & Pick<TokenStreamingClientOptions, 'getAccessToken' | 'contextId' | 'WebSocketImpl' | 'debug'>;
@@ -146,6 +170,7 @@ export class TokenStreamingClient {
     this.opts = {
       autoReconnect: options.autoReconnect ?? true,
       requestTimeoutMs: options.requestTimeoutMs ?? 30_000,
+      beta: options.beta ?? false,
       reconnect: {
         maxAttempts: options.reconnect?.maxAttempts ?? 8,
         baseDelayMs: options.reconnect?.baseDelayMs ?? 500,
@@ -212,7 +237,10 @@ export class TokenStreamingClient {
    * `on_token` / `on_stop_token` events.
    */
   async addMessage(message: string): Promise<void> {
-    await this.call('add_message', { message });
+    // Beta: fire-and-forget so the 30s RPC timer never applies to a long turn.
+    // The turn's lifecycle arrives via on_message_start / on_stop_token /
+    // on_turn_complete / on_error notifications instead of the RPC reply.
+    await this.call('add_message', { message }, { awaitResponse: !this.opts.beta });
   }
 
   /**
@@ -224,9 +252,14 @@ export class TokenStreamingClient {
     toolResponses: ClientSideToolResponse[]
   ): Promise<void> {
     // The server may issue a response with `success: true` but it is also
-    // valid to send as a notification (no id) per the docs. We use id-based
-    // form to surface validation errors.
-    await this.call('client_side_tool_responses', { tool_responses: toolResponses });
+    // valid to send as a notification (no id) per the docs. Classic mode uses
+    // the id-based form to surface validation errors; beta mode goes
+    // fire-and-forget (errors arrive via on_error) to avoid the RPC timeout.
+    await this.call(
+      'client_side_tool_responses',
+      { tool_responses: toolResponses },
+      { awaitResponse: !this.opts.beta }
+    );
   }
 
   /**
@@ -288,6 +321,7 @@ export class TokenStreamingClient {
       result = await this.call('connect_to_context', {
         context_id: this.opts.contextId,
         access_token: accessToken,
+        beta: this.opts.beta,
       });
     } catch (err) {
       const e =
@@ -412,6 +446,15 @@ export class TokenStreamingClient {
         break;
       case 'on_stop_token':
         this.emit('on_stop_token', notification.params as never);
+        break;
+      case 'on_message_start':
+        this.emit('on_message_start', notification.params as never);
+        break;
+      case 'on_turn_complete':
+        this.emit('on_turn_complete', notification.params as never);
+        break;
+      case 'on_error':
+        this.emit('on_error', notification.params as never);
         break;
       case 'on_tool_call':
         this.emit('on_tool_call', notification.params as never);

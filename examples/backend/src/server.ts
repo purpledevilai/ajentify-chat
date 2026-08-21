@@ -178,7 +178,14 @@ async function handleProxyRequest(
     }
 
     case 'get_context': {
-      return ajentifyFetch(`/context/${request.contextId}`);
+      // Pass client_id so Ajentify 404s if the requested context belongs
+      // to a different end-user. The browser controls contextId and the
+      // org API key can act on every context in the org, so the per-user
+      // scoping has to live somewhere — pushing it to the API keeps this
+      // proxy a thin pass-through.
+      return ajentifyFetch(`/context/${request.contextId}`, {
+        query: { client_id: user.clientId ?? undefined },
+      });
     }
 
     case 'get_context_history': {
@@ -189,7 +196,10 @@ async function handleProxyRequest(
     }
 
     case 'delete_context': {
-      await ajentifyFetch(`/context/${request.contextId}`, { method: 'DELETE' });
+      await ajentifyFetch(`/context/${request.contextId}`, {
+        method: 'DELETE',
+        query: { client_id: user.clientId ?? undefined },
+      });
       return { success: true };
     }
 

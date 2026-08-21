@@ -73,6 +73,13 @@ export interface AjentifyConfig {
   };
   /** Per-RPC response timeout. */
   requestTimeoutMs?: number;
+  /**
+   * Opt into the beta streaming protocol (fire-and-forget `add_message`,
+   * per-segment message boundaries so preamble/final text split into separate
+   * bubbles, and per-round server persistence). Requires a beta-capable Token
+   * Streaming Server. Defaults to `false`.
+   */
+  beta?: boolean;
   /** Surface custom events emitted by the agent. */
   onEvents?: (events: AgentEvent[], responseId: string) => void;
   /** Surface internal AjentifyErrors (transport, tool, callback, etc). */
@@ -264,6 +271,7 @@ export function AjentifyProvider({ config, children }: AjentifyProviderProps): J
       WebSocketImpl: config.WebSocketImpl,
       reconnect: config.reconnect,
       requestTimeoutMs: config.requestTimeoutMs,
+      beta: config.beta,
       onEvents: (...args) => configRef.current.onEvents?.(...args),
       onError: (err) => configRef.current.onError?.(err),
       agentSpeaksFirst: config.agentSpeaksFirst,

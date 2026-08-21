@@ -58,12 +58,26 @@ export interface ToolCallMessage {
   toolCallId: string;
   toolName: string;
   toolInput: Record<string, unknown>;
+  /**
+   * The tool's response, merged onto the call (by `toolCallId`) when it
+   * arrives. Undefined while the call is still running; set once the response
+   * is received (live or via hydration). Renders as the expandable "Response"
+   * section on the tool-call row.
+   */
+  toolOutput?: string;
   /** Whether this tool is being dispatched to the client side. */
   clientSide?: boolean;
   createdAt: number;
 }
 
-/** A response from a previously-issued tool call. */
+/**
+ * A response from a previously-issued tool call.
+ *
+ * @deprecated Tool responses are now merged onto the matching
+ * {@link ToolCallMessage} via `toolOutput`; the live and hydration paths no
+ * longer emit standalone `tool_response` messages. Retained for backward
+ * compatibility with any consumer still constructing them.
+ */
 export interface ToolResponseMessage {
   kind: 'tool_response';
   localId: string;

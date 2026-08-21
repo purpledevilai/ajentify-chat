@@ -31,6 +31,13 @@ export interface CurrentContextStoreOptions {
   reconnect?: TokenStreamingClientOptions['reconnect'];
   /** Forwarded to TokenStreamingClient. */
   requestTimeoutMs?: TokenStreamingClientOptions['requestTimeoutMs'];
+  /**
+   * Opt into the beta streaming protocol. When true the store adjusts its
+   * status machine (a per-segment `on_stop_token` keeps `status: 'streaming'`;
+   * `on_turn_complete` ends the turn) and registers `on_message_start` /
+   * `on_turn_complete` / `on_error` handlers.
+   */
+  beta?: boolean;
   /** Optional callback for server-side agent events. */
   onEvents?: (events: AgentEvent[], responseId: string) => void;
   /** Surface all internal errors. */
@@ -141,14 +148,26 @@ function filteredMessagesToChatMessages(
         createdAt: Date.now(),
       });
     } else if (m.type === 'tool_response') {
-      out.push({
-        kind: 'tool_response',
-        localId: uid('msg'),
-        toolCallId: m.tool_call_id ?? uid('tc'),
-        toolName: m.tool_name,
-        toolOutput: m.tool_output ?? '',
-        createdAt: Date.now(),
-      });
+      // Merge the response onto the matching tool_call (by tool_call_id) so
+      // each call is a single expandable item. Fall back to a standalone
+      // tool_response only if no matching call was emitted (defensive).
+      const match = m.tool_call_id
+        ? out.find(
+            (o) => o.kind === 'tool_call' && o.toolCallId === m.tool_call_id
+          )
+        : undefined;
+      if (match && match.kind === 'tool_call') {
+        match.toolOutput = m.tool_output ?? '';
+      } else {
+        out.push({
+          kind: 'tool_response',
+          localId: uid('msg'),
+          toolCallId: m.tool_call_id ?? uid('tc'),
+          toolName: m.tool_name,
+          toolOutput: m.tool_output ?? '',
+          createdAt: Date.now(),
+        });
+      }
     } else if (m.sender && typeof m.message === 'string') {
       out.push({
         kind: 'text',
@@ -295,6 +314,7 @@ export function createCurrentContextStore(options: CurrentContextStoreOptions) {
         WebSocketImpl: options.WebSocketImpl,
         reconnect: options.reconnect,
         requestTimeoutMs: options.requestTimeoutMs,
+        beta: options.beta,
       });
 
       wsClient = client;
@@ -346,6 +366,17 @@ export function createCurrentContextStore(options: CurrentContextStoreOptions) {
         set({ agent, agentSpeaksFirst: Boolean(agent_speaks_first) });
       });
 
+      // Beta only: a new assistant text segment is starting. Reset the pending
+      // buffer to the fresh response_id so preamble and final text commit as
+      // separate bubbles (the intervening on_stop_token flushes the preamble).
+      client.on('on_message_start', ({ response_id }) => {
+        if (isStale()) return;
+        set({
+          pendingResponse: { responseId: response_id, text: '' },
+          status: 'streaming',
+        });
+      });
+
       client.on('on_token', ({ token, response_id }) => {
         if (isStale()) return;
         const current = get().pendingResponse;
@@ -367,6 +398,10 @@ export function createCurrentContextStore(options: CurrentContextStoreOptions) {
 
       client.on('on_stop_token', ({ response_id }) => {
         if (isStale()) return;
+        // In beta the turn continues after a segment ends (more segments / tool
+        // rounds may follow), so keep 'streaming' until on_turn_complete. In
+        // classic mode a single on_stop_token ends the turn -> 'connected'.
+        const nextStatus = options.beta ? 'streaming' : 'connected';
         const pending = get().pendingResponse;
         if (pending && pending.responseId === response_id && pending.text) {
           const aiMessage: TextMessage = {
@@ -380,11 +415,26 @@ export function createCurrentContextStore(options: CurrentContextStoreOptions) {
           set({
             messages: [...get().messages, aiMessage],
             pendingResponse: null,
-            status: 'connected',
+            status: nextStatus,
           });
         } else {
-          set({ pendingResponse: null, status: 'connected' });
+          set({ pendingResponse: null, status: nextStatus });
         }
+      });
+
+      // Beta only: the whole turn (all segments + tools + recursion) finished.
+      client.on('on_turn_complete', () => {
+        if (isStale()) return;
+        set({ pendingResponse: null, status: 'connected' });
+      });
+
+      // Beta only: server-side turn failure (surfaced explicitly because
+      // add_message is fire-and-forget and no RPC error reply is sent).
+      client.on('on_error', ({ message }) => {
+        if (isStale()) return;
+        const e = new AjentifyError(message, 'rpc');
+        set({ status: 'error', error: message });
+        emitError(e);
       });
 
       client.on('on_tool_call', (params) => {
@@ -409,18 +459,14 @@ export function createCurrentContextStore(options: CurrentContextStoreOptions) {
 
       client.on('on_tool_response', (params) => {
         if (isStale()) return;
+        // Merge the response onto the matching tool_call so it becomes one
+        // expandable item (rather than a separate, hidden tool_response).
         set({
-          messages: [
-            ...get().messages,
-            {
-              kind: 'tool_response',
-              localId: uid('msg'),
-              toolCallId: params.tool_call_id,
-              toolName: params.tool_name,
-              toolOutput: params.tool_output ?? '',
-              createdAt: Date.now(),
-            },
-          ],
+          messages: get().messages.map((m) =>
+            m.kind === 'tool_call' && m.toolCallId === params.tool_call_id
+              ? { ...m, toolOutput: params.tool_output ?? '' }
+              : m
+          ),
         });
       });
 
@@ -448,16 +494,18 @@ export function createCurrentContextStore(options: CurrentContextStoreOptions) {
 
         try {
           const responses = await csts.getState().handleToolCalls(tool_calls);
-          // Surface the responses locally as well.
-          const respMsgs = responses.map((r, i) => ({
-            kind: 'tool_response' as const,
-            localId: uid('msg'),
-            toolCallId: r.tool_call_id,
-            toolName: tool_calls[i]?.tool_name,
-            toolOutput: r.response,
-            createdAt: Date.now(),
-          }));
-          set({ messages: [...get().messages, ...respMsgs] });
+          // Merge each response onto its matching tool_call so the row becomes
+          // a single expandable item (consistent with server-side tools).
+          const outputById = new Map(
+            responses.map((r) => [r.tool_call_id, r.response])
+          );
+          set({
+            messages: get().messages.map((m) =>
+              m.kind === 'tool_call' && outputById.has(m.toolCallId)
+                ? { ...m, toolOutput: outputById.get(m.toolCallId) ?? '' }
+                : m
+            ),
+          });
           // The server replies to `client_side_tool_responses` only AFTER it
           // has already emitted on_token / on_stop_token (and possibly the
           // next round's on_client_side_tool_calls) for the continuation. By

@@ -47,6 +47,8 @@ interface Setup {
 function setupStores(opts: {
   agentSpeaksFirst?: boolean;
   proxy?: ReturnType<typeof makeProxy>;
+  beta?: boolean;
+  onError?: (err: unknown) => void;
 } = {}): Setup {
   const proxy = opts.proxy ?? makeProxy();
   const server = createMockServer();
@@ -57,6 +59,8 @@ function setupStores(opts: {
     clientSideToolsStore: clientSideTools,
     WebSocketImpl: MockWebSocket as unknown as typeof WebSocket,
     agentSpeaksFirst: opts.agentSpeaksFirst,
+    beta: opts.beta,
+    onError: opts.onError,
     reconnect: { maxAttempts: 0 },
   });
   return { current, contexts, proxy, server };
@@ -266,6 +270,119 @@ describe('currentContextStore', () => {
 
       expect(current.getState().status).toBe('error');
       expect(current.getState().creating).toBe(false);
+    });
+  });
+
+  describe('beta streaming protocol', () => {
+    /** Materialize a connected beta context with one human message sent. */
+    async function connectBeta() {
+      const setup = setupStores({ beta: true });
+      autoRespond(setup.server);
+      await setup.current.getState().startNewContext();
+      await setup.current.getState().sendMessage('hi');
+      return setup;
+    }
+
+    it('sends connect_to_context with beta:true and add_message fire-and-forget (no id)', async () => {
+      const { current, server } = await connectBeta();
+
+      const frames = server.sent.map(
+        (raw) => JSON.parse(raw) as { method: string; id?: string }
+      );
+      const connectFrame = frames.find((f) => f.method === 'connect_to_context');
+      expect(connectFrame).toBeDefined();
+      const connectParams = JSON.parse(
+        server.sent.find((raw) => raw.includes('connect_to_context'))!
+      ) as { params: { beta?: boolean } };
+      expect(connectParams.params.beta).toBe(true);
+
+      const addFrame = frames.find((f) => f.method === 'add_message');
+      expect(addFrame).toBeDefined();
+      // Fire-and-forget => no RPC id, so the 30s timer never applies.
+      expect(addFrame?.id).toBeUndefined();
+
+      current.getState().disconnect();
+    });
+
+    it('splits preamble and final text into two bubbles across segments', async () => {
+      const { current, server } = await connectBeta();
+
+      // Segment 1: preamble
+      server.push({ method: 'on_message_start', params: { response_id: 'r1' } });
+      server.push({ method: 'on_token', params: { token: 'Let me check…', response_id: 'r1' } });
+      server.push({ method: 'on_stop_token', params: { response_id: 'r1' } });
+
+      // After a segment ends the turn is still going -> status stays streaming.
+      expect(current.getState().status).toBe('streaming');
+      expect(current.getState().pendingResponse).toBeNull();
+
+      // Segment 2: final answer
+      server.push({ method: 'on_message_start', params: { response_id: 'r2' } });
+      server.push({ method: 'on_token', params: { token: 'All done!', response_id: 'r2' } });
+      server.push({ method: 'on_stop_token', params: { response_id: 'r2' } });
+
+      // Turn finishes.
+      server.push({ method: 'on_turn_complete', params: {} });
+
+      const aiMessages = current
+        .getState()
+        .messages.filter((m) => m.kind === 'text' && m.sender === 'ai');
+      expect(aiMessages).toHaveLength(2);
+      expect((aiMessages[0] as { content: string }).content).toBe('Let me check…');
+      expect((aiMessages[1] as { content: string }).content).toBe('All done!');
+      expect(current.getState().status).toBe('connected');
+      expect(current.getState().pendingResponse).toBeNull();
+
+      current.getState().disconnect();
+    });
+
+    it('merges on_tool_response onto the matching tool_call (no standalone response message)', async () => {
+      const { current, server } = await connectBeta();
+
+      server.push({
+        method: 'on_tool_call',
+        params: { tool_call_id: 'tc1', tool_name: 'search', tool_input: { q: 'hi' } },
+      });
+
+      let toolCalls = current
+        .getState()
+        .messages.filter((m) => m.kind === 'tool_call');
+      expect(toolCalls).toHaveLength(1);
+      expect((toolCalls[0] as { toolOutput?: string }).toolOutput).toBeUndefined();
+
+      server.push({
+        method: 'on_tool_response',
+        params: { tool_call_id: 'tc1', tool_name: 'search', tool_output: '{"n":1}' },
+      });
+
+      toolCalls = current
+        .getState()
+        .messages.filter((m) => m.kind === 'tool_call');
+      expect(toolCalls).toHaveLength(1);
+      expect((toolCalls[0] as { toolOutput?: string }).toolOutput).toBe('{"n":1}');
+      // No standalone tool_response message is emitted.
+      expect(
+        current.getState().messages.some((m) => m.kind === 'tool_response')
+      ).toBe(false);
+
+      current.getState().disconnect();
+    });
+
+    it('on_error sets status to error and surfaces the message', async () => {
+      const onError = vi.fn();
+      const { current, server } = setupStores({ beta: true, onError });
+      autoRespond(server);
+
+      await current.getState().startNewContext();
+      await current.getState().sendMessage('hi');
+
+      server.push({ method: 'on_error', params: { message: 'boom' } });
+
+      expect(current.getState().status).toBe('error');
+      expect(current.getState().error).toBe('boom');
+      expect(onError).toHaveBeenCalled();
+
+      current.getState().disconnect();
     });
   });
 });

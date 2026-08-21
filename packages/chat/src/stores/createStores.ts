@@ -25,6 +25,7 @@ export interface CreateStoresOptions {
   WebSocketImpl?: typeof WebSocket;
   reconnect?: CurrentContextStoreOptions['reconnect'];
   requestTimeoutMs?: CurrentContextStoreOptions['requestTimeoutMs'];
+  beta?: CurrentContextStoreOptions['beta'];
   onEvents?: CurrentContextStoreOptions['onEvents'];
   onError?: CurrentContextStoreOptions['onError'];
   agentSpeaksFirst?: CurrentContextStoreOptions['agentSpeaksFirst'];
@@ -55,6 +56,7 @@ export function createStores(options: CreateStoresOptions): AjentifyStores {
     WebSocketImpl: options.WebSocketImpl,
     reconnect: options.reconnect,
     requestTimeoutMs: options.requestTimeoutMs,
+    beta: options.beta,
     onEvents: options.onEvents,
     onError: options.onError,
     agentSpeaksFirst: options.agentSpeaksFirst,

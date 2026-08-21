@@ -4,10 +4,25 @@ import * as React from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeSanitize from 'rehype-sanitize';
-import { Wrench, Loader2 } from 'lucide-react';
-import type { ChatMessage } from '../types';
+import { Wrench, Loader2, ChevronRight, ChevronDown } from 'lucide-react';
+import type { ChatMessage, ToolCallMessage } from '../types';
 import { cn } from '../lib/utils';
 import { TypingText } from './TypingText';
+
+/**
+ * Pretty-print a value as JSON when it is (or parses as) JSON, otherwise
+ * return it as raw text. Used for tool params/response display.
+ */
+function formatMaybeJson(value: unknown): string {
+  if (value == null) return '';
+  if (typeof value === 'object') return JSON.stringify(value, null, 2);
+  const s = String(value);
+  try {
+    return JSON.stringify(JSON.parse(s), null, 2);
+  } catch {
+    return s;
+  }
+}
 
 export interface MessageClassNames {
   root?: string;
@@ -70,18 +85,11 @@ export function Message({
 }: MessageProps): JSX.Element | null {
   if (message.kind === 'tool_call') {
     return (
-      <div className={cn('aj-tool-call', classNames?.toolBubble)}>
-        <Wrench aria-hidden />
-        <span>
-          {toolRunning ? 'Running ' : 'Called '}
-          <span className="aj-tool-call-name">{message.toolName}</span>
-          {toolRunning ? (
-            <span className="aj-tool-call-status">
-              <Loader2 className="aj-spin" aria-hidden />
-            </span>
-          ) : null}
-        </span>
-      </div>
+      <ToolCallMessageView
+        message={message}
+        toolRunning={toolRunning}
+        className={classNames?.toolBubble}
+      />
     );
   }
 
@@ -133,6 +141,76 @@ export function Message({
           <Markdown>{message.content}</Markdown>
         )}
       </div>
+    </div>
+  );
+}
+
+/**
+ * Expandable, shimmer-while-running tool-call row. Clicking the header toggles
+ * a details panel showing pretty-printed parameters and response (JSON is
+ * pretty-printed when detected, otherwise shown raw).
+ */
+function ToolCallMessageView({
+  message,
+  toolRunning,
+  className,
+}: {
+  message: ToolCallMessage;
+  toolRunning: boolean;
+  className?: string;
+}): JSX.Element {
+  const running = toolRunning && message.toolOutput == null;
+  const [open, setOpen] = React.useState(false);
+  const hasParams =
+    Boolean(message.toolInput) && Object.keys(message.toolInput).length > 0;
+  const hasDetails = hasParams || message.toolOutput != null;
+
+  return (
+    <div className={cn('aj-tool-call', running && 'aj-tool-call--running', className)}>
+      <button
+        type="button"
+        className="aj-tool-call-header"
+        onClick={() => hasDetails && setOpen((o) => !o)}
+        aria-expanded={open}
+        disabled={!hasDetails}
+      >
+        {hasDetails ? (
+          open ? (
+            <ChevronDown aria-hidden />
+          ) : (
+            <ChevronRight aria-hidden />
+          )
+        ) : (
+          <Wrench aria-hidden />
+        )}
+        <span className={cn('aj-tool-call-label', running && 'aj-shimmer-text')}>
+          {running ? 'Running ' : 'Called '}
+          <span className="aj-tool-call-name">{message.toolName}</span>
+        </span>
+        {running ? (
+          <Loader2 className="aj-spin aj-tool-call-spin" aria-hidden />
+        ) : null}
+      </button>
+      {open && hasDetails ? (
+        <div className="aj-tool-call-details">
+          {hasParams ? (
+            <div className="aj-tool-call-section">
+              <div className="aj-tool-call-section-title">Parameters</div>
+              <pre className="aj-tool-call-pre">
+                {formatMaybeJson(message.toolInput)}
+              </pre>
+            </div>
+          ) : null}
+          <div className="aj-tool-call-section">
+            <div className="aj-tool-call-section-title">Response</div>
+            <pre className="aj-tool-call-pre">
+              {message.toolOutput != null
+                ? formatMaybeJson(message.toolOutput)
+                : 'Running…'}
+            </pre>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

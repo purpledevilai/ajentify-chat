@@ -106,17 +106,6 @@ export function ChatMessages({
     ];
   }, [messages, pendingResponse]);
 
-  // Pre-compute which tool_call messages have *not* received a matching
-  // tool_response yet. Combined with `status === 'awaiting_tool_responses'`
-  // this drives the inline "Running…" indicator.
-  const respondedToolCallIds = React.useMemo(() => {
-    const responded = new Set<string>();
-    for (const m of messages) {
-      if (m.kind === 'tool_response') responded.add(m.toolCallId);
-    }
-    return responded;
-  }, [messages]);
-
   const showWaiting = isWaitingForResponse && waitingIndicator !== null;
 
   // Show the centered "new chat" hero while the user is in a fresh draft
@@ -185,12 +174,12 @@ export function ChatMessages({
           </div>
         ) : (
           renderItems.map((m) => {
-            const isToolCall = m.kind === 'tool_call';
+            // A tool call is "running" until its response is merged on
+            // (toolOutput becomes defined). Drives the shimmer + spinner.
             const toolRunning =
               !hideToolRunningIndicator &&
-              isToolCall &&
-              status === 'awaiting_tool_responses' &&
-              !respondedToolCallIds.has(m.toolCallId);
+              m.kind === 'tool_call' &&
+              m.toolOutput == null;
             return (
               <Message
                 key={m.kind === 'text' ? m.localId : m.localId ?? uid('msg')}
