@@ -44,6 +44,7 @@ export default function App() {
   return (
     <AjentifyProvider
       config={{
+        websocketUrl: 'ws://localhost:8084/ws',
         onAjentifyProxyRequest,
         clientSideTools,
         onError: (err) => {

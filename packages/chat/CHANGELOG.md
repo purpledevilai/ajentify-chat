@@ -1,6 +1,59 @@
 # Changelog
 
-## 0.4.0 — Rebrand to "proxy", remove `createAjentifyGatewayClient`
+## 0.4.0 — Beta streaming protocol + richer tool-call UI
+
+Opt-in **beta streaming protocol** plus a reworked tool-call presentation. All
+new behavior is gated behind `beta: true` on the provider config (or the
+`TokenStreamingClient`), so existing consumers are unaffected until they opt in.
+Requires a token streaming server that understands the beta protocol.
+
+### New: beta streaming protocol (`beta: true`)
+
+```diff
+  <AjentifyProvider config={{
+    onAjentifyProxyRequest,
++   beta: true,
+  }}>
+```
+
+When enabled:
+
+- **`connect_to_context` sends `beta: true`.** The server routes to the
+  structured-event agent and enables per-round persistence, so long tool-call
+  chains and interrupted turns still leave consistent saved history.
+- **`add_message` / `client_side_tool_responses` are fire-and-forget.** They no
+  longer wait on the 30s RPC reply, so a long agent turn can no longer trip the
+  `RPC 'add_message' timed out after 30000ms` error. The turn lifecycle instead
+  arrives via notifications.
+- **Per-segment message boundaries.** The server emits a fresh
+  `on_message_start` before each assistant text segment and an `on_stop_token`
+  after it, so a model's preamble text (before a tool call) and its final answer
+  render as **separate bubbles** instead of being concatenated into one.
+- **New terminal notifications.** `on_turn_complete` signals the whole turn
+  (all segments + tools + recursion) is done and input can be re-enabled;
+  `on_error` reports a server-side turn failure in place of the RPC error reply
+  that is no longer sent.
+
+### Tool calls: merged responses + shimmer + expandable details
+
+- **Tool responses are now merged onto their tool call.** `ToolCallMessage`
+  gains an optional `toolOutput` that is filled in when the response arrives,
+  instead of appending a separate message. `ToolResponseMessage` is deprecated.
+- **Shimmer while running.** A tool call shimmers until its `toolOutput` is
+  populated.
+- **Expandable details.** Each tool call can be expanded to reveal its input
+  parameters and response, pretty-printed when the payload is detected as JSON.
+
+### Migration checklist
+
+1. Bump `@ajentify/chat` to `^0.4.0`.
+2. To adopt the new protocol, add `beta: true` to your `<AjentifyProvider>`
+   config **and** ensure your token streaming server supports the beta protocol.
+   Leaving it off keeps the classic behavior.
+3. If you read `ToolResponseMessage` anywhere, switch to reading `toolOutput`
+   off the matching `ToolCallMessage`.
+
+## 0.3.1 — Rebrand to "proxy", remove `createAjentifyGatewayClient`
 
 The "gateway" concept is now **"proxy"**. The name communicates what the developer's backend actually does: proxy requests to the Ajentify REST API. The `createAjentifyGatewayClient` factory has been removed entirely — developers now write the `fetch` call directly, keeping full control over auth, headers, credentials, and error handling.
 
