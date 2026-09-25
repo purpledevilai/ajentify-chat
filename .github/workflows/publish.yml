@@ -1,0 +1,47 @@
+name: Publish to npm
+
+# Publishes packages/chat when a push to main carries a version not yet on npm.
+# Bump `version` in packages/chat/package.json (PR → main) to release. Re-runs are no-ops.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write   # npm provenance attestation
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4   # version from package.json "packageManager"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @ajentify/chat typecheck
+      - run: pnpm --filter @ajentify/chat build
+      - run: pnpm --filter @ajentify/chat test --if-present
+
+      - name: Publish if this version is new
+        working-directory: packages/chat
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          NAME=$(node -p "require('./package.json').name")
+          VERSION=$(node -p "require('./package.json').version")
+          if npm view "$NAME@$VERSION" version >/dev/null 2>&1; then
+            echo "::notice::$NAME@$VERSION already on npm — nothing to publish"
+            exit 0
+          fi
+          FLAGS="--access public --no-git-checks"
+          if node -e "process.exit(require('./package.json').repository ? 0 : 1)"; then FLAGS="$FLAGS --provenance"; fi
+          pnpm publish $FLAGS
+          echo "::notice::published $NAME@$VERSION"
