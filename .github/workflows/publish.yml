@@ -1,7 +1,12 @@
 name: Publish to npm
 
-# Publishes packages/chat when a push to main carries a version not yet on npm.
-# Bump `version` in packages/chat/package.json (PR → main) to release. Re-runs are no-ops.
+# Publishes when a push to main carries a packages/chat/package.json version that is not yet on npm.
+# Bump `version` (PR → main) to release. Idempotent: re-runs are no-ops.
+#
+# Auth: npm Trusted Publishing (OIDC) — configure once on npmjs.com:
+#   package → Settings → Trusted Publisher → GitHub Actions
+#   owner: purpledevilai, repository: <this repo>, workflow: publish.yml
+# No NPM_TOKEN / secrets needed.
 on:
   push:
     branches: [main]
@@ -22,9 +27,9 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-          registry-url: https://registry.npmjs.org
           cache: pnpm
 
+      - run: npm install -g npm@latest && npm --version
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @ajentify/chat typecheck
       - run: pnpm --filter @ajentify/chat build
@@ -32,8 +37,6 @@ jobs:
 
       - name: Publish if this version is new
         working-directory: packages/chat
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           NAME=$(node -p "require('./package.json').name")
           VERSION=$(node -p "require('./package.json').version")
@@ -41,7 +44,7 @@ jobs:
             echo "::notice::$NAME@$VERSION already on npm — nothing to publish"
             exit 0
           fi
-          FLAGS="--access public --no-git-checks"
+          FLAGS="--access public"
           if node -e "process.exit(require('./package.json').repository ? 0 : 1)"; then FLAGS="$FLAGS --provenance"; fi
-          pnpm publish $FLAGS
+          npm publish $FLAGS
           echo "::notice::published $NAME@$VERSION"
