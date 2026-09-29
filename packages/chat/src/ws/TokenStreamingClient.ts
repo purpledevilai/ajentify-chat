@@ -8,10 +8,9 @@ import {
 import { uid } from '../lib/utils';
 
 /**
- * Default token streaming endpoint. Devs can override on the provider.
+ * Default Ajentify connect server endpoint. Devs can override on the provider.
  */
-export const DEFAULT_TOKEN_STREAMING_URL =
-  'wss://token-streaming-server.prod.token-streaming.ajentify.com/ws';
+export const DEFAULT_TOKEN_STREAMING_URL = 'wss://connect.ajentify.com/ws';
 
 // -------- protocol shapes (JSON-RPC dialect) --------
 
