@@ -4,6 +4,9 @@ import {
   type Agent,
   type ClientSideToolCall,
   type ClientSideToolResponse,
+  type StopInvocationResult,
+  type SubagentEvent,
+  type SubagentTerminalStatus,
 } from '../types';
 import { uid } from '../lib/utils';
 
@@ -76,6 +79,35 @@ export interface TokenStreamingEvents {
     response_id: string;
   }) => void;
   on_events: (params: { events: AgentEvent[]; response_id: string }) => void;
+  /**
+   * The message you just sent was accepted while a turn was already running
+   * (or another process holds the context). It sits in the context inbox
+   * and is processed automatically after the current turn — no resend.
+   */
+  on_queued: (params: { item_id: string; position?: number }) => void;
+  /**
+   * Terminal frame of a turn stopped by `stop_invocation`. Replaces
+   * `on_turn_complete` for that turn; may be preceded by an `on_stop_token`
+   * closing the open segment. `response_id` is the last segment's id (may be
+   * absent when nothing had streamed yet).
+   */
+  on_cancelled: (params: { response_id?: string | null }) => void;
+  /**
+   * Progress of a sub-agent the current agent is awaiting (direct children
+   * only). `parent_tool_call_id` is the id of the parent's
+   * `send_context_message` tool call.
+   */
+  on_subagent_event: (params: {
+    parent_tool_call_id: string;
+    child_context_id: string;
+    event: SubagentEvent;
+  }) => void;
+  /** The awaited sub-agent finished (its reply arrives as a tool-call pair). */
+  on_subagent_complete: (params: {
+    parent_tool_call_id: string;
+    child_context_id: string;
+    status: SubagentTerminalStatus;
+  }) => void;
   agent_connected: (params: { agent: Agent; agent_speaks_first?: boolean }) => void;
 }
 
@@ -261,6 +293,20 @@ export class TokenStreamingClient {
       { tool_responses: toolResponses },
       { awaitResponse: false }
     );
+  }
+
+  /**
+   * Stop the turn that is currently generating. Awaits the RPC reply
+   * (`{ success, cancelled }`); the turn itself ends with `on_cancelled`.
+   * `cancelled: false` means nothing was running. Awaited sub-agents keep
+   * running server-side; only this context's turn is stopped.
+   */
+  async stopInvocation(): Promise<StopInvocationResult> {
+    const result = await this.call('stop_invocation', {});
+    return {
+      success: result.success !== false,
+      cancelled: Boolean(result.cancelled),
+    };
   }
 
   /**
@@ -470,6 +516,18 @@ export class TokenStreamingClient {
         break;
       case 'on_events':
         this.emit('on_events', notification.params as never);
+        break;
+      case 'on_queued':
+        this.emit('on_queued', notification.params as never);
+        break;
+      case 'on_cancelled':
+        this.emit('on_cancelled', (notification.params ?? {}) as never);
+        break;
+      case 'on_subagent_event':
+        this.emit('on_subagent_event', notification.params as never);
+        break;
+      case 'on_subagent_complete':
+        this.emit('on_subagent_complete', notification.params as never);
         break;
       default:
         this.opts.debug?.('unknown notification', notification.method, notification.params);

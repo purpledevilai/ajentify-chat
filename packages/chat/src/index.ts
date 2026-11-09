@@ -37,6 +37,17 @@ export {
   type DefineClientSideToolsOptions,
 } from './lib/defineTools';
 
+// Sub-agent card derivation (headless; same output for live + hydrated history)
+export {
+  deriveSubagentCard,
+  deriveSubagentCards,
+  findSubagentReply,
+  isSubagentReplyToolCall,
+  isSubagentToolCall,
+  linkedSubagentReplyIds,
+  replyOriginalToolCallId,
+} from './lib/subagents';
+
 // Utilities
 export { cn, createSafeStorage, uid } from './lib/utils';
 export { injectChatStyles } from './lib/injectStyles';

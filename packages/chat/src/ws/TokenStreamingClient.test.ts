@@ -202,6 +202,90 @@ describe('TokenStreamingClient', () => {
     client.disconnect();
   });
 
+  it('emits the 0.7 frames: on_queued / on_cancelled / on_subagent_event / on_subagent_complete', async () => {
+    const server = createMockServer();
+    const client = new TokenStreamingClient({
+      url: 'ws://test',
+      contextId: 'ctx_abc',
+      getAccessToken: async () => 'tok',
+      WebSocketImpl: MockWebSocket as unknown as typeof WebSocket,
+      autoReconnect: false,
+    });
+    const origOnSend = server.onSend;
+    server.onSend = (raw: string) => {
+      origOnSend(raw);
+      const msg = JSON.parse(raw) as { method: string; id?: string };
+      if (msg.method === 'connect_to_context' && msg.id) {
+        server.push({ id: msg.id, result: { success: true, agent: {} } });
+      }
+    };
+    const seen: Array<[string, unknown]> = [];
+    client.on('on_queued', (p) => seen.push(['on_queued', p]));
+    client.on('on_cancelled', (p) => seen.push(['on_cancelled', p]));
+    client.on('on_subagent_event', (p) => seen.push(['on_subagent_event', p]));
+    client.on('on_subagent_complete', (p) => seen.push(['on_subagent_complete', p]));
+
+    await client.connect();
+    server.push({ method: 'on_queued', params: { item_id: 'i1' } });
+    server.push({ method: 'on_cancelled', params: { response_id: 'r1' } });
+    server.push({
+      method: 'on_subagent_event',
+      params: {
+        parent_tool_call_id: 's1',
+        child_context_id: 'c1',
+        event: { type: 'tool_call', tool_call_id: 'k1', tool_name: 'search', tool_input: {} },
+      },
+    });
+    server.push({
+      method: 'on_subagent_complete',
+      params: { parent_tool_call_id: 's1', child_context_id: 'c1', status: 'complete' },
+    });
+
+    expect(seen).toEqual([
+      ['on_queued', { item_id: 'i1' }],
+      ['on_cancelled', { response_id: 'r1' }],
+      [
+        'on_subagent_event',
+        {
+          parent_tool_call_id: 's1',
+          child_context_id: 'c1',
+          event: { type: 'tool_call', tool_call_id: 'k1', tool_name: 'search', tool_input: {} },
+        },
+      ],
+      ['on_subagent_complete', { parent_tool_call_id: 's1', child_context_id: 'c1', status: 'complete' }],
+    ]);
+
+    client.disconnect();
+  });
+
+  it('stopInvocation() awaits the stop_invocation RPC reply', async () => {
+    const server = createMockServer();
+    const client = new TokenStreamingClient({
+      url: 'ws://test',
+      contextId: 'ctx_abc',
+      getAccessToken: async () => 'tok',
+      WebSocketImpl: MockWebSocket as unknown as typeof WebSocket,
+      autoReconnect: false,
+    });
+    server.onSend = (raw: string) => {
+      const msg = JSON.parse(raw) as { method: string; id?: string };
+      if (msg.method === 'connect_to_context' && msg.id) {
+        server.push({ id: msg.id, result: { success: true, agent: {} } });
+      }
+      if (msg.method === 'stop_invocation' && msg.id) {
+        server.push({ id: msg.id, result: { success: true, cancelled: true } });
+      }
+      server.sent.push(raw);
+    };
+    await client.connect();
+    const result = await client.stopInvocation();
+    expect(result).toEqual({ success: true, cancelled: true });
+    const req = findRequest(server.sent, 'stop_invocation');
+    expect(req?.id).toBeDefined();
+    expect(req?.params).toEqual({});
+    client.disconnect();
+  });
+
   it('surfaces RPC errors from the server', async () => {
     const server = createMockServer();
     const client = new TokenStreamingClient({

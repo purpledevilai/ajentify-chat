@@ -1,5 +1,86 @@
 # Changelog
 
+## 0.7.0 — Queued messages, sub-agent cards, cancel
+
+UI + store support for the connect server's context-runner protocol
+(`on_queued`, `on_cancelled`, `on_subagent_event`, `on_subagent_complete`)
+and for the `create_context` / `send_context_message` agent tools. Fully
+additive: no breaking changes, no new config required.
+
+> Requires a connect server with the context runner (Phase 3+) for the new
+> frames; older servers simply never send them and 0.7.0 behaves like 0.6.0.
+
+### New server → client frames (`TokenStreamingEvents`)
+
+- **`on_queued { item_id }`** — the message you just sent was accepted while a
+  turn was already running (or another process held the context). The store
+  flags the user's bubble (`TextMessage.queued` / `queuedItemId`), keeps
+  `status: 'streaming'` through the current turn's `on_turn_complete`, and
+  clears the flag on the next `on_message_start`. The default UI shows a
+  small "Queued" caption under the bubble.
+- **`on_cancelled { response_id }`** — terminal frame of a turn stopped with
+  `stop_invocation`. The partial assistant bubble is marked
+  `TextMessage.cancelled` ("Stopped" caption), tool calls still running get
+  the server's `"cancelled by user"` output (`CANCELLED_TOOL_OUTPUT`) so the
+  shimmer stops and hydrated history matches, and `status` returns to
+  `'connected'`.
+- **`on_subagent_event { parent_tool_call_id, child_context_id, event }`** /
+  **`on_subagent_complete { …, status }`** — progress of a sub-agent the
+  agent is awaiting. Collected into `currentContext.subagentRuns`, keyed by
+  the parent `send_context_message` tool call id (`SubagentRun`: child
+  context id, `running | complete | error | cancelled`, latest event, child
+  tool calls with their state).
+
+### Sub-agent cards
+
+- **`deriveSubagentCard(toolCall, messages, subagentRuns)`** (+
+  `deriveSubagentCards`, `findSubagentReply`, `isSubagentToolCall`,
+  `isSubagentReplyToolCall`, `linkedSubagentReplyIds`) turn the tool-call
+  history into a `SubagentCard` view-model. Pure and identical for live
+  streams and `GET /context` hydration:
+  - `send_context_message` with `await_response: true` → **awaiting card**:
+    "running" from its acknowledgement until either the
+    `send_context_message_response` tool call whose
+    `original_tool_call_id` matches appears (its output becomes
+    `replyText`, even when it lands in a later turn) or
+    `on_subagent_complete` arrives. Shows the child's current tool name
+    while live progress is available.
+  - `send_context_message` with `await_response: false` → **sent chip**.
+  - `create_context` → **"Created sub-agent context" chip** (`context_id`
+    parsed from the tool output).
+- **`<SubagentCard />`** (`@ajentify/chat/ui`) renders the model;
+  `<ChatMessages />` wires it up automatically and hides the linked
+  `_response` tool call. `<Message />` accepts a `subagentCard` prop for
+  headless composition. New `classNames.message.subagent`,
+  `queuedMarker`, `cancelledMarker` slots.
+
+### Cancel
+
+- **`currentContext.cancel()`** / **`useChat().cancel()`** send
+  `stop_invocation` and resolve with `{ success, cancelled }`;
+  `useChat().canCancel` / `isCancelling` and the store's `cancelling` flag
+  drive the UI. `TokenStreamingClient.stopInvocation()` is the low-level
+  call.
+- **`<ChatInput />`** shows a stop button while `status === 'streaming'`
+  (replaces the send button when the composer is empty). Opt out with
+  `showCancelButton={false}`; override with `onCancel`; style with
+  `classNames.cancelButton`.
+
+### Sending mid-turn
+
+`sendMessage()` while a turn is streaming no longer resets the in-flight
+partial — the server queues the message and answers `on_queued`. The default
+`<ChatInput />` still gates send while streaming (`disableWhileStreaming`);
+pass `disableWhileStreaming={false}` to let users queue follow-ups.
+
+### New types
+
+`SubagentEvent`, `SubagentRun`, `SubagentRunStatus`, `SubagentTerminalStatus`,
+`SubagentChildToolCall`, `SubagentCard`, `SubagentCardKind`,
+`SubagentCardStatus`, `StopInvocationResult`, and the constants
+`CREATE_CONTEXT_TOOL`, `SEND_CONTEXT_MESSAGE_TOOL`,
+`SEND_CONTEXT_MESSAGE_RESPONSE_TOOL`, `CANCELLED_TOOL_OUTPUT`.
+
 ## 0.6.0 — Beta streaming protocol is now the only protocol
 
 The streaming protocol introduced as opt-in `beta: true` in 0.4.0 is now the

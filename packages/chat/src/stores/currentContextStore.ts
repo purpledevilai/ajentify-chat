@@ -1,6 +1,7 @@
 import { createStore, type StoreApi } from 'zustand/vanilla';
 import {
   AjentifyError,
+  CANCELLED_TOOL_OUTPUT,
   type Agent,
   type AgentEvent,
   type ChatMessage,
@@ -8,6 +9,8 @@ import {
   type CreateContextRequest,
   type FilteredContext,
   type FilteredContextMessage,
+  type StopInvocationResult,
+  type SubagentRun,
   type TextMessage,
 } from '../types';
 import { uid } from '../lib/utils';
@@ -59,6 +62,20 @@ export interface CurrentContextStore {
   pendingResponse: { responseId: string; text: string } | null;
   status: ConnectionStatus;
   error: string | null;
+  /**
+   * Live progress of every sub-agent the agent is awaiting, keyed by the
+   * parent `send_context_message` tool call id. Fed by `on_subagent_event` /
+   * `on_subagent_complete`; cleared whenever the message list is replaced
+   * (new chat, hydration). Use {@link deriveSubagentCard} to turn a
+   * `send_context_message` tool call + this map into a renderable card.
+   */
+  subagentRuns: Record<string, SubagentRun>;
+  /**
+   * True between `cancel()` being called and the server's `on_cancelled`
+   * (or any other terminal frame) arriving. Lets the UI disable the stop
+   * button while the request is in flight.
+   */
+  cancelling: boolean;
   /**
    * True while the dev's `create_context` callback is in flight. Set when a
    * draft is materialized on first send (or when `startNewContext()` is
@@ -120,6 +137,16 @@ export interface CurrentContextStore {
    * (`create_context` + `connect`) and then dispatches the message.
    */
   sendMessage: (text: string) => Promise<void>;
+
+  /**
+   * Stop the turn that is currently generating (`stop_invocation`). Resolves
+   * with the server's `{ success, cancelled }` reply; `cancelled: false`
+   * means nothing was running. The turn ends with `on_cancelled`, which
+   * marks the partial assistant bubble and returns `status` to
+   * `'connected'`. Awaited sub-agents keep running server-side. No-op
+   * (resolves `{ success: false, cancelled: false }`) when not connected.
+   */
+  cancel: () => Promise<StopInvocationResult>;
 
   /** Disconnect and clear chat state. */
   disconnect: () => void;
@@ -191,6 +218,23 @@ export function createCurrentContextStore(options: CurrentContextStoreOptions) {
     options.onError?.(err);
   }
 
+  /** True when a human message is still waiting in the server inbox. */
+  function hasQueuedHuman(messages: ChatMessage[]): boolean {
+    return messages.some(
+      (m) => m.kind === 'text' && m.sender === 'human' && m.queued === true
+    );
+  }
+
+  /** Drop the queued flag from every human message (the next turn started). */
+  function clearQueuedFlags(messages: ChatMessage[]): ChatMessage[] {
+    if (!hasQueuedHuman(messages)) return messages;
+    return messages.map((m) =>
+      m.kind === 'text' && m.sender === 'human' && m.queued
+        ? { ...m, queued: false }
+        : m
+    );
+  }
+
   const store = createStore<CurrentContextStore>((set, get) => ({
     contextId: null,
     agent: null,
@@ -199,6 +243,8 @@ export function createCurrentContextStore(options: CurrentContextStoreOptions) {
     pendingResponse: null,
     status: 'idle',
     error: null,
+    subagentRuns: {},
+    cancelling: false,
     creating: false,
     isDraft: false,
     draftRequest: null,
@@ -244,6 +290,8 @@ export function createCurrentContextStore(options: CurrentContextStoreOptions) {
           pendingResponse: null,
           status: 'connecting',
           error: null,
+          subagentRuns: {},
+          cancelling: false,
           creating: true,
           isDraft: false,
           draftRequest: null,
@@ -275,6 +323,8 @@ export function createCurrentContextStore(options: CurrentContextStoreOptions) {
         pendingResponse: null,
         status: 'draft',
         error: null,
+        subagentRuns: {},
+        cancelling: false,
         creating: false,
         isDraft: true,
         draftRequest: req ?? null,
@@ -298,8 +348,9 @@ export function createCurrentContextStore(options: CurrentContextStoreOptions) {
         status: 'connecting',
         error: null,
         pendingResponse: null,
+        cancelling: false,
         creating: false,
-        ...(hydratedMessages ? { messages: hydratedMessages } : {}),
+        ...(hydratedMessages ? { messages: hydratedMessages, subagentRuns: {} } : {}),
       });
 
       const contextsStore = options.contextsStore;
@@ -368,9 +419,39 @@ export function createCurrentContextStore(options: CurrentContextStoreOptions) {
       // bubbles (the intervening on_stop_token flushes the preamble).
       client.on('on_message_start', ({ response_id }) => {
         if (isStale()) return;
+        // A new turn consumed whatever was waiting in the inbox: drop the
+        // "queued" marker from the user's bubble(s).
         set({
+          messages: clearQueuedFlags(get().messages),
           pendingResponse: { responseId: response_id, text: '' },
           status: 'streaming',
+        });
+      });
+
+      // The message we just sent was accepted but not started: a turn is
+      // already running (or another process holds the context). It will be
+      // processed automatically — flag the user's bubble and keep waiting.
+      client.on('on_queued', ({ item_id }) => {
+        if (isStale()) return;
+        const msgs = get().messages;
+        let idx = -1;
+        for (let i = msgs.length - 1; i >= 0; i -= 1) {
+          const m = msgs[i];
+          if (m && m.kind === 'text' && m.sender === 'human' && !m.queued && !m.queuedItemId) {
+            idx = i;
+            break;
+          }
+        }
+        const next =
+          idx >= 0
+            ? msgs.map((m, i) =>
+                i === idx ? { ...(m as TextMessage), queued: true, queuedItemId: item_id } : m
+              )
+            : msgs;
+        set({
+          messages: next,
+          status:
+            get().status === 'awaiting_tool_responses' ? 'awaiting_tool_responses' : 'streaming',
         });
       });
 
@@ -419,10 +500,169 @@ export function createCurrentContextStore(options: CurrentContextStoreOptions) {
         }
       });
 
-      // The whole turn (all segments + tools + recursion) finished.
+      // The whole turn (all segments + tools + recursion) finished. If a
+      // human message is still queued the runner starts the next turn right
+      // away, so keep the waiting indicator up.
       client.on('on_turn_complete', () => {
         if (isStale()) return;
-        set({ pendingResponse: null, status: 'connected' });
+        set({
+          pendingResponse: null,
+          cancelling: false,
+          status: hasQueuedHuman(get().messages) ? 'streaming' : 'connected',
+        });
+      });
+
+      // Terminal frame of a turn the user stopped. The open segment (if any)
+      // was already closed by on_stop_token, so usually the partial text is
+      // the last AI bubble; mark it. Tool calls that were still running get
+      // the same "cancelled by user" output the server persists, so the
+      // shimmer stops and hydrated history matches.
+      client.on('on_cancelled', ({ response_id }) => {
+        if (isStale()) return;
+        const pending = get().pendingResponse;
+        let msgs = get().messages;
+        if (pending && pending.text) {
+          msgs = [
+            ...msgs,
+            {
+              kind: 'text',
+              localId: uid('msg'),
+              sender: 'ai',
+              content: pending.text,
+              responseId: pending.responseId,
+              cancelled: true,
+              createdAt: Date.now(),
+            },
+          ];
+        } else {
+          let idx = -1;
+          if (response_id) {
+            for (let i = msgs.length - 1; i >= 0; i -= 1) {
+              const m = msgs[i];
+              if (m && m.kind === 'text' && m.sender === 'ai' && m.responseId === response_id) {
+                idx = i;
+                break;
+              }
+            }
+          }
+          if (idx < 0) {
+            const last = msgs[msgs.length - 1];
+            if (last && last.kind === 'text' && last.sender === 'ai') idx = msgs.length - 1;
+          }
+          if (idx >= 0) {
+            msgs = msgs.map((m, i) =>
+              i === idx ? { ...(m as TextMessage), cancelled: true } : m
+            );
+          }
+        }
+        msgs = msgs.map((m) =>
+          m.kind === 'tool_call' && m.toolOutput == null
+            ? { ...m, toolOutput: CANCELLED_TOOL_OUTPUT }
+            : m
+        );
+        set({
+          messages: msgs,
+          pendingResponse: null,
+          cancelling: false,
+          status: hasQueuedHuman(msgs) ? 'streaming' : 'connected',
+        });
+      });
+
+      // Progress of a sub-agent the agent is awaiting, keyed by the parent's
+      // send_context_message tool call id.
+      client.on('on_subagent_event', ({ parent_tool_call_id, child_context_id, event }) => {
+        if (isStale()) return;
+        if (!parent_tool_call_id || !event) return;
+        const runs = get().subagentRuns;
+        const prev: SubagentRun = runs[parent_tool_call_id] ?? {
+          parentToolCallId: parent_tool_call_id,
+          childContextId: child_context_id,
+          status: 'running',
+          toolCalls: [],
+        };
+        let toolCalls = prev.toolCalls;
+        let errorMessage = prev.errorMessage;
+        if (event.type === 'tool_call') {
+          const exists = toolCalls.some((t) => t.toolCallId === event.tool_call_id);
+          if (!exists) {
+            toolCalls = [
+              ...toolCalls,
+              {
+                toolCallId: event.tool_call_id,
+                toolName: event.tool_name,
+                toolInput: event.tool_input ?? {},
+                state: 'running',
+              },
+            ];
+          }
+        } else if (event.type === 'tool_response') {
+          const exists = toolCalls.some((t) => t.toolCallId === event.tool_call_id);
+          toolCalls = exists
+            ? toolCalls.map((t) =>
+                t.toolCallId === event.tool_call_id
+                  ? { ...t, state: 'complete', toolOutput: event.tool_output ?? '' }
+                  : t
+              )
+            : [
+                ...toolCalls,
+                {
+                  toolCallId: event.tool_call_id,
+                  toolName: event.tool_name,
+                  toolOutput: event.tool_output ?? '',
+                  state: 'complete',
+                },
+              ];
+        } else if (event.type === 'error') {
+          errorMessage = event.message;
+        }
+        set({
+          subagentRuns: {
+            ...runs,
+            [parent_tool_call_id]: {
+              ...prev,
+              childContextId: child_context_id || prev.childContextId,
+              // A terminal status set by on_subagent_complete is never
+              // downgraded by a late event; an error event is sticky.
+              status:
+                prev.status !== 'running'
+                  ? prev.status
+                  : event.type === 'error'
+                    ? 'error'
+                    : 'running',
+              latestEvent: event,
+              toolCalls,
+              errorMessage,
+            },
+          },
+        });
+      });
+
+      client.on('on_subagent_complete', ({ parent_tool_call_id, child_context_id, status }) => {
+        if (isStale()) return;
+        if (!parent_tool_call_id) return;
+        const runs = get().subagentRuns;
+        const prev: SubagentRun = runs[parent_tool_call_id] ?? {
+          parentToolCallId: parent_tool_call_id,
+          childContextId: child_context_id,
+          status: 'running',
+          toolCalls: [],
+        };
+        const terminal: SubagentRun['status'] =
+          status === 'error' || status === 'cancelled' ? status : 'complete';
+        set({
+          subagentRuns: {
+            ...runs,
+            [parent_tool_call_id]: {
+              ...prev,
+              childContextId: child_context_id || prev.childContextId,
+              status: terminal,
+              // Anything still marked running is over now.
+              toolCalls: prev.toolCalls.map((t) =>
+                t.state === 'running' ? { ...t, state: 'complete' } : t
+              ),
+            },
+          },
+        });
       });
 
       // Server-side turn failure (surfaced explicitly because add_message is
@@ -430,7 +670,7 @@ export function createCurrentContextStore(options: CurrentContextStoreOptions) {
       client.on('on_error', ({ message }) => {
         if (isStale()) return;
         const e = new AjentifyError(message, 'rpc');
-        set({ status: 'error', error: message });
+        set({ status: 'error', error: message, cancelling: false });
         emitError(e);
       });
 
@@ -537,7 +777,7 @@ export function createCurrentContextStore(options: CurrentContextStoreOptions) {
     },
 
     hydrateMessages(messages) {
-      set({ messages: filteredMessagesToChatMessages(messages) });
+      set({ messages: filteredMessagesToChatMessages(messages), subagentRuns: {} });
     },
 
     async sendMessage(text) {
@@ -611,10 +851,15 @@ export function createCurrentContextStore(options: CurrentContextStoreOptions) {
           'transport'
         );
       }
+      // Sending while a turn is running is allowed since 0.7 (the server
+      // queues it and answers with `on_queued`). Keep the in-flight partial
+      // and status in that case instead of resetting them.
+      const midTurn =
+        get().status === 'streaming' || get().status === 'awaiting_tool_responses';
       set({
         messages: [...get().messages, human],
-        status: 'streaming',
-        pendingResponse: null,
+        status: midTurn ? get().status : 'streaming',
+        pendingResponse: midTurn ? get().pendingResponse : null,
         error: null,
       });
       try {
@@ -625,6 +870,29 @@ export function createCurrentContextStore(options: CurrentContextStoreOptions) {
             ? err
             : new AjentifyError('add_message failed', 'rpc', err);
         set({ status: 'error', error: e.message });
+        emitError(e);
+        throw e;
+      }
+    },
+
+    async cancel() {
+      if (!wsClient || !wsClient.isOpen) {
+        return { success: false, cancelled: false };
+      }
+      set({ cancelling: true });
+      try {
+        const result = await wsClient.stopInvocation();
+        if (!result.cancelled) {
+          // Nothing was running server-side; no on_cancelled will follow.
+          set({ cancelling: false });
+        }
+        return result;
+      } catch (err) {
+        const e =
+          err instanceof AjentifyError
+            ? err
+            : new AjentifyError('stop_invocation failed', 'rpc', err);
+        set({ cancelling: false, error: e.message });
         emitError(e);
         throw e;
       }
@@ -647,7 +915,7 @@ export function createCurrentContextStore(options: CurrentContextStoreOptions) {
         }
         wsClient = null;
       }
-      set({ status: 'disconnected', pendingResponse: null });
+      set({ status: 'disconnected', pendingResponse: null, cancelling: false });
     },
 
     clear() {
@@ -668,6 +936,8 @@ export function createCurrentContextStore(options: CurrentContextStoreOptions) {
         pendingResponse: null,
         status: 'idle',
         error: null,
+        subagentRuns: {},
+        cancelling: false,
         creating: false,
         isDraft: false,
         draftRequest: null,

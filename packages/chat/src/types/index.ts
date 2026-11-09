@@ -47,6 +47,24 @@ export interface TextMessage {
   pending?: boolean;
   /** Server-issued response_id for tracking. Only set for AI messages. */
   responseId?: string;
+  /**
+   * Human messages only. `true` after the server acknowledged the message
+   * with `on_queued` — a turn was already running (or another process held
+   * the context) and the message will be processed automatically after it.
+   * Cleared on the next `on_message_start`.
+   */
+  queued?: boolean;
+  /**
+   * The inbox `item_id` the server assigned when it queued this message.
+   * Only set together with `queued`.
+   */
+  queuedItemId?: string;
+  /**
+   * AI messages only. `true` when the turn that produced this segment was
+   * stopped by the user (`stop_invocation` → `on_cancelled`); the text is the
+   * partial output that had streamed before the stop.
+   */
+  cancelled?: boolean;
   /** Unix-ms timestamp. */
   createdAt: number;
 }
@@ -88,6 +106,123 @@ export interface ToolResponseMessage {
 }
 
 export type ChatMessage = TextMessage | ToolCallMessage | ToolResponseMessage;
+
+// ---------- Sub-agents (0.7) ----------
+
+/** Name of the tool the agent calls to spawn a child context. */
+export const CREATE_CONTEXT_TOOL = 'create_context';
+/** Name of the tool the agent calls to message another context. */
+export const SEND_CONTEXT_MESSAGE_TOOL = 'send_context_message';
+/**
+ * Name of the synthetic tool call the server appends when an awaited
+ * `send_context_message` reply lands. Its `tool_input.original_tool_call_id`
+ * points at the `send_context_message` call it answers and its tool output is
+ * the child's reply text.
+ */
+export const SEND_CONTEXT_MESSAGE_RESPONSE_TOOL = 'send_context_message_response';
+/**
+ * Tool output the server writes onto every tool call that was still running
+ * when the user stopped the turn. The store mirrors it onto dangling tool
+ * calls on `on_cancelled` so live and hydrated history look the same.
+ */
+export const CANCELLED_TOOL_OUTPUT = 'cancelled by user';
+
+/**
+ * One progress event of a sub-agent the current agent is awaiting, relayed
+ * by the server as `on_subagent_event`. Direct children only.
+ */
+export type SubagentEvent =
+  | { type: 'message_start' }
+  | {
+      type: 'tool_call';
+      tool_call_id: string;
+      tool_name: string;
+      tool_input?: Record<string, unknown>;
+    }
+  | {
+      type: 'tool_response';
+      tool_call_id: string;
+      tool_name: string;
+      tool_output?: string;
+    }
+  | { type: 'turn_complete' }
+  | { type: 'error'; message: string };
+
+/** Terminal status reported by `on_subagent_complete`. */
+export type SubagentTerminalStatus = 'complete' | 'error' | 'cancelled';
+export type SubagentRunStatus = 'running' | SubagentTerminalStatus;
+
+/** A tool call made by a sub-agent, as relayed through `on_subagent_event`. */
+export interface SubagentChildToolCall {
+  toolCallId: string;
+  toolName: string;
+  toolInput?: Record<string, unknown>;
+  toolOutput?: string;
+  state: 'running' | 'complete';
+}
+
+/**
+ * Live state of one awaited sub-agent, keyed by the parent's
+ * `send_context_message` tool call id. Built from `on_subagent_event` /
+ * `on_subagent_complete`; never persisted, so it is empty after hydration.
+ */
+export interface SubagentRun {
+  parentToolCallId: string;
+  childContextId: string;
+  status: SubagentRunStatus;
+  /** The most recent `on_subagent_event` payload. */
+  latestEvent?: SubagentEvent;
+  /** Every child tool call seen so far, in arrival order. */
+  toolCalls: SubagentChildToolCall[];
+  /** Set when `latestEvent.type === 'error'`. */
+  errorMessage?: string;
+}
+
+/**
+ * How a sub-agent-related tool call should be rendered.
+ *
+ * - `awaiting` — `send_context_message` with `await_response: true`. The card
+ *   is "running" until the reply lands or `on_subagent_complete` arrives.
+ * - `sent` — `send_context_message` with `await_response: false` (fire and
+ *   forget): a small chip.
+ * - `created` — `create_context`: a small "created sub-agent context" chip.
+ */
+export type SubagentCardKind = 'awaiting' | 'sent' | 'created';
+
+/**
+ * Card status. `awaiting` only ever applies to `kind: 'awaiting'`; the chips
+ * go straight from `awaiting` (tool still running) to `complete` when their
+ * acknowledgement arrives.
+ */
+export type SubagentCardStatus = 'awaiting' | 'complete' | 'error' | 'cancelled';
+
+/**
+ * Derived view-model for a sub-agent tool call. Produced by
+ * {@link deriveSubagentCard} from the message list plus the live
+ * `subagentRuns` map; identical for live and hydrated histories.
+ */
+export interface SubagentCard {
+  kind: SubagentCardKind;
+  status: SubagentCardStatus;
+  /** The parent `send_context_message` / `create_context` tool call id. */
+  toolCallId: string;
+  /** Target context (`sent`/`awaiting`) or the created context (`created`). */
+  contextId?: string;
+  /** The message sent to the child (`sent`/`awaiting`). */
+  message?: string;
+  /** The tool's immediate acknowledgement string, once it arrived. */
+  ack?: string;
+  /** The child's reply text, once the `_response` pair landed (`awaiting`). */
+  replyText?: string;
+  /** Tool call id of the linked `send_context_message_response` call. */
+  replyToolCallId?: string;
+  /** Live progress, when the server relayed any (`awaiting` only). */
+  run?: SubagentRun;
+  /** Name of the child tool currently running (or the latest one seen). */
+  currentToolName?: string;
+  /** Error text when `status === 'error'`. */
+  errorMessage?: string;
+}
 
 // ---------- Client-side tools ----------
 
@@ -141,6 +276,13 @@ export type ConnectionStatus =
   | 'awaiting_tool_responses'
   | 'error'
   | 'disconnected';
+
+/** Reply to the `stop_invocation` RPC. */
+export interface StopInvocationResult {
+  success: boolean;
+  /** `false` when no turn was running (nothing to stop). */
+  cancelled: boolean;
+}
 
 // ---------- REST shapes ----------
 

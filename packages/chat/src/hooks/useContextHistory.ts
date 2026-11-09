@@ -88,6 +88,8 @@ export function useContextHistory(): UseContextHistoryResult {
         pendingResponse: null,
         status: 'connecting',
         error: null,
+        subagentRuns: {},
+        cancelling: false,
         creating: false,
         isDraft: false,
         draftRequest: null,

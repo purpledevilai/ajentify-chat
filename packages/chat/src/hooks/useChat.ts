@@ -2,7 +2,13 @@
 
 import { useCallback } from 'react';
 import { useStore } from 'zustand';
-import type { Agent, ChatMessage, ConnectionStatus } from '../types';
+import type {
+  Agent,
+  ChatMessage,
+  ConnectionStatus,
+  StopInvocationResult,
+  SubagentRun,
+} from '../types';
 import { useAjentifyStores } from './useAjentify';
 
 export interface UseChatResult {
@@ -38,8 +44,22 @@ export interface UseChatResult {
    * placeholder ("Thinking…", "Working…", a spinner, etc.) during this window.
    */
   isWaitingForResponse: boolean;
+  /**
+   * Live progress of awaited sub-agents keyed by the parent
+   * `send_context_message` tool call id (see `deriveSubagentCard`).
+   */
+  subagentRuns: Record<string, SubagentRun>;
+  /**
+   * True while the agent is generating and `cancel()` would stop something
+   * (`status === 'streaming'`).
+   */
+  canCancel: boolean;
+  /** True between `cancel()` and the server's terminal `on_cancelled`. */
+  isCancelling: boolean;
   /** Send a human message. Materializes a draft if needed before sending. */
   send: (text: string) => Promise<void>;
+  /** Stop the turn currently generating (`stop_invocation`). */
+  cancel: () => Promise<StopInvocationResult>;
   /** Dismiss the current error and restore the chat to a usable state. */
   clearError: () => void;
   /** Disconnect the WebSocket but keep the messages. */
@@ -61,9 +81,15 @@ export function useChat(): UseChatResult {
   const error = useStore(stores.currentContext, (s) => s.error);
   const creating = useStore(stores.currentContext, (s) => s.creating);
   const isDraft = useStore(stores.currentContext, (s) => s.isDraft);
+  const subagentRuns = useStore(stores.currentContext, (s) => s.subagentRuns);
+  const isCancelling = useStore(stores.currentContext, (s) => s.cancelling);
 
   const send = useCallback(
     (text: string) => stores.currentContext.getState().sendMessage(text),
+    [stores]
+  );
+  const cancel = useCallback(
+    () => stores.currentContext.getState().cancel(),
     [stores]
   );
   const clearError = useCallback(
@@ -100,7 +126,11 @@ export function useChat(): UseChatResult {
     isDraft,
     isPreparingNewChat: creating || isDraft,
     isWaitingForResponse,
+    subagentRuns,
+    canCancel: status === 'streaming',
+    isCancelling,
     send,
+    cancel,
     clearError,
     disconnect,
   };
