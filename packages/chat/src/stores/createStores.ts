@@ -25,7 +25,11 @@ export interface CreateStoresOptions {
   WebSocketImpl?: typeof WebSocket;
   reconnect?: CurrentContextStoreOptions['reconnect'];
   requestTimeoutMs?: CurrentContextStoreOptions['requestTimeoutMs'];
-  beta?: CurrentContextStoreOptions['beta'];
+  /**
+   * @deprecated Since 0.6.0 the (formerly beta) streaming protocol is the only
+   * protocol; this option is accepted and ignored.
+   */
+  beta?: boolean;
   onEvents?: CurrentContextStoreOptions['onEvents'];
   onError?: CurrentContextStoreOptions['onError'];
   agentSpeaksFirst?: CurrentContextStoreOptions['agentSpeaksFirst'];
@@ -56,7 +60,6 @@ export function createStores(options: CreateStoresOptions): AjentifyStores {
     WebSocketImpl: options.WebSocketImpl,
     reconnect: options.reconnect,
     requestTimeoutMs: options.requestTimeoutMs,
-    beta: options.beta,
     onEvents: options.onEvents,
     onError: options.onError,
     agentSpeaksFirst: options.agentSpeaksFirst,

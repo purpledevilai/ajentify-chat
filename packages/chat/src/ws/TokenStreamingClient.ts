@@ -40,21 +40,25 @@ export interface TokenStreamingEvents {
   status: (status: 'connecting' | 'connected' | 'disconnected' | 'error') => void;
   error: (err: AjentifyError) => void;
   on_token: (params: { token: string; response_id: string }) => void;
+  /**
+   * The current assistant text segment (`response_id`) has finished. The turn
+   * may continue (another segment, a tool round) — wait for `on_turn_complete`
+   * before treating the turn as done.
+   */
   on_stop_token: (params: { response_id: string }) => void;
   /**
-   * Beta protocol only: a new assistant text segment is starting (fresh
-   * `response_id`). Lets the client split preamble / final text into separate
-   * bubbles.
+   * A new assistant text segment is starting (fresh `response_id`). Lets the
+   * client split preamble / final text into separate bubbles.
    */
   on_message_start: (params: { response_id: string }) => void;
   /**
-   * Beta protocol only: the entire turn (all segments + tools + recursion) has
-   * finished. Signals the client to re-enable input.
+   * The entire turn (all segments + tools + recursion) has finished. Signals
+   * the client to re-enable input.
    */
   on_turn_complete: (params: { response_id?: string }) => void;
   /**
-   * Beta protocol only: the turn failed server-side. Replaces the RPC error
-   * reply that is no longer sent because `add_message` is fire-and-forget.
+   * The turn failed server-side. This replaces the RPC error reply, which is
+   * never sent because `add_message` is fire-and-forget.
    */
   on_error: (params: { message: string }) => void;
   on_tool_call: (params: {
@@ -103,14 +107,15 @@ export interface TokenStreamingClientOptions {
     /** Max delay between attempts in ms. Defaults to 10_000. */
     maxDelayMs?: number;
   };
-  /** Per-request response timeout in ms. Defaults to 30_000. */
+  /**
+   * Per-request response timeout in ms for RPCs that await a reply
+   * (`connect_to_context`). Defaults to 30_000. `add_message` and
+   * `client_side_tool_responses` are fire-and-forget and never time out.
+   */
   requestTimeoutMs?: number;
   /**
-   * Opt into the beta streaming protocol: `connect_to_context` sends
-   * `beta: true`, `add_message` / `client_side_tool_responses` are sent
-   * fire-and-forget (no RPC timeout), and the server emits per-segment
-   * `on_message_start` / `on_stop_token` plus a terminal `on_turn_complete`
-   * (or `on_error`). Defaults to `false`.
+   * @deprecated Since 0.6.0 the (formerly beta) streaming protocol is the only
+   * protocol; this option is accepted and ignored. Remove it from your config.
    */
   beta?: boolean;
   /** Inject a custom WebSocket constructor (useful for tests / Node). */
@@ -126,21 +131,24 @@ interface PendingRequest {
 }
 
 /**
- * Lightweight, framework-agnostic client for the Ajentify token streaming
- * server. Implements the JSON-RPC-like dialect documented in
- * docs/WEBSOCKET_API.md.
+ * Lightweight, framework-agnostic client for the Ajentify connect server.
+ * Implements the JSON-RPC-like dialect documented in docs/WEBSOCKET_API.md.
  *
  *   - Always calls `getAccessToken()` right before every (re)connect.
  *   - Auto-reconnects with exponential backoff.
  *   - Re-issues `connect_to_context` automatically on each reconnect so the
  *     caller does not need to manage that lifecycle.
+ *   - `add_message` / `client_side_tool_responses` are fire-and-forget; the
+ *     turn lifecycle arrives as `on_message_start` / `on_token` /
+ *     `on_stop_token` (per segment) and a terminal `on_turn_complete` or
+ *     `on_error`.
  *
  * Usage is event-driven:
  *
  * ```ts
  * const client = new TokenStreamingClient({ contextId, getAccessToken });
  * client.on('on_token', ({ token }) => console.log(token));
- * client.on('on_stop_token', () => console.log('done'));
+ * client.on('on_turn_complete', () => console.log('done'));
  * await client.connect();
  * await client.addMessage('Hello!');
  * ```
@@ -148,7 +156,7 @@ interface PendingRequest {
 export class TokenStreamingClient {
   private readonly url: string;
   private readonly opts: Required<
-    Pick<TokenStreamingClientOptions, 'autoReconnect' | 'requestTimeoutMs' | 'beta'>
+    Pick<TokenStreamingClientOptions, 'autoReconnect' | 'requestTimeoutMs'>
   > & {
     reconnect: Required<NonNullable<TokenStreamingClientOptions['reconnect']>>;
   } & Pick<TokenStreamingClientOptions, 'getAccessToken' | 'contextId' | 'WebSocketImpl' | 'debug'>;
@@ -169,7 +177,6 @@ export class TokenStreamingClient {
     this.opts = {
       autoReconnect: options.autoReconnect ?? true,
       requestTimeoutMs: options.requestTimeoutMs ?? 30_000,
-      beta: options.beta ?? false,
       reconnect: {
         maxAttempts: options.reconnect?.maxAttempts ?? 8,
         baseDelayMs: options.reconnect?.baseDelayMs ?? 500,
@@ -232,32 +239,27 @@ export class TokenStreamingClient {
   // ---------------- protocol helpers ----------------
 
   /**
-   * Send a message to the agent. The response is streamed via the
-   * `on_token` / `on_stop_token` events.
+   * Send a message to the agent. Fire-and-forget (no RPC id) so the request
+   * timer never applies to a long turn. The response is streamed via
+   * `on_message_start` / `on_token` / `on_stop_token` and the turn ends with
+   * `on_turn_complete` (or `on_error`).
    */
   async addMessage(message: string): Promise<void> {
-    // Beta: fire-and-forget so the 30s RPC timer never applies to a long turn.
-    // The turn's lifecycle arrives via on_message_start / on_stop_token /
-    // on_turn_complete / on_error notifications instead of the RPC reply.
-    await this.call('add_message', { message }, { awaitResponse: !this.opts.beta });
+    await this.call('add_message', { message }, { awaitResponse: false });
   }
 
   /**
    * Send tool responses for a previously-emitted `on_client_side_tool_calls`.
-   * Does NOT wait for a response — the server continues streaming the next
-   * agent turn via `on_token` / `on_stop_token`.
+   * Fire-and-forget (no RPC id); server-side failures arrive via `on_error`
+   * and the server continues streaming the next agent segment.
    */
   async sendClientSideToolResponses(
     toolResponses: ClientSideToolResponse[]
   ): Promise<void> {
-    // The server may issue a response with `success: true` but it is also
-    // valid to send as a notification (no id) per the docs. Classic mode uses
-    // the id-based form to surface validation errors; beta mode goes
-    // fire-and-forget (errors arrive via on_error) to avoid the RPC timeout.
     await this.call(
       'client_side_tool_responses',
       { tool_responses: toolResponses },
-      { awaitResponse: !this.opts.beta }
+      { awaitResponse: false }
     );
   }
 
@@ -320,7 +322,9 @@ export class TokenStreamingClient {
       result = await this.call('connect_to_context', {
         context_id: this.opts.contextId,
         access_token: accessToken,
-        beta: this.opts.beta,
+        // Harmless on servers that have mainlined the protocol (ignored);
+        // selects the right handler on servers that still gate on it.
+        beta: true,
       });
     } catch (err) {
       const e =

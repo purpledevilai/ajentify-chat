@@ -71,13 +71,17 @@ export interface AjentifyConfig {
     baseDelayMs?: number;
     maxDelayMs?: number;
   };
-  /** Per-RPC response timeout. */
+  /**
+   * Response timeout for RPCs that await a reply (`connect_to_context`).
+   * `add_message` / `client_side_tool_responses` are fire-and-forget and
+   * never time out.
+   */
   requestTimeoutMs?: number;
   /**
-   * Opt into the beta streaming protocol (fire-and-forget `add_message`,
-   * per-segment message boundaries so preamble/final text split into separate
-   * bubbles, and per-round server persistence). Requires a beta-capable Token
-   * Streaming Server. Defaults to `false`.
+   * @deprecated Since 0.6.0 the (formerly beta) streaming protocol is the only
+   * protocol: fire-and-forget `add_message`, per-segment message boundaries
+   * and `on_turn_complete` are always on. This option is accepted and ignored;
+   * remove it from your config.
    */
   beta?: boolean;
   /** Surface custom events emitted by the agent. */
@@ -271,7 +275,6 @@ export function AjentifyProvider({ config, children }: AjentifyProviderProps): J
       WebSocketImpl: config.WebSocketImpl,
       reconnect: config.reconnect,
       requestTimeoutMs: config.requestTimeoutMs,
-      beta: config.beta,
       onEvents: (...args) => configRef.current.onEvents?.(...args),
       onError: (err) => configRef.current.onError?.(err),
       agentSpeaksFirst: config.agentSpeaksFirst,
