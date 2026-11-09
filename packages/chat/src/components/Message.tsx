@@ -4,10 +4,11 @@ import * as React from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeSanitize from 'rehype-sanitize';
-import { Wrench, Loader2, ChevronRight, ChevronDown } from 'lucide-react';
-import type { ChatMessage, ToolCallMessage } from '../types';
+import { Wrench, Loader2, ChevronRight, ChevronDown, Clock, Ban } from 'lucide-react';
+import type { ChatMessage, SubagentCard as SubagentCardModel, ToolCallMessage } from '../types';
 import { cn } from '../lib/utils';
 import { TypingText } from './TypingText';
+import { SubagentCard, type SubagentCardClassNames } from './SubagentCard';
 
 /**
  * Pretty-print a value as JSON when it is (or parses as) JSON, otherwise
@@ -30,6 +31,11 @@ export interface MessageClassNames {
   aiBubble?: string;
   systemBubble?: string;
   toolBubble?: string;
+  /** The small "Queued" marker under a human bubble. */
+  queuedMarker?: string;
+  /** The small "Stopped" marker under a cancelled AI bubble. */
+  cancelledMarker?: string;
+  subagent?: SubagentCardClassNames;
 }
 
 export interface MessageProps {
@@ -44,6 +50,13 @@ export interface MessageProps {
    * "running…" indicator (v0.2). Only applies to `kind: 'tool_call'`.
    */
   toolRunning?: boolean;
+  /**
+   * Derived sub-agent view-model for this tool call (see
+   * `deriveSubagentCard`). When set, the row renders as a sub-agent card /
+   * chip instead of the generic tool row. `<ChatMessages />` computes this
+   * for you; headless consumers composing `<Message />` directly pass it in.
+   */
+  subagentCard?: SubagentCardModel | null;
   classNames?: MessageClassNames;
 }
 
@@ -81,9 +94,15 @@ export function Message({
   streaming = false,
   animate = true,
   toolRunning = false,
+  subagentCard,
   classNames,
 }: MessageProps): JSX.Element | null {
   if (message.kind === 'tool_call') {
+    if (subagentCard) {
+      return (
+        <SubagentCard card={subagentCard} classNames={classNames?.subagent} />
+      );
+    }
     return (
       <ToolCallMessageView
         message={message}
@@ -108,12 +127,15 @@ export function Message({
   }
 
   const isHuman = message.sender === 'human';
+  const queued = isHuman && message.queued === true;
+  const cancelled = !isHuman && message.cancelled === true;
 
   return (
     <div
       className={cn(
         'aj-message-row',
         isHuman ? 'aj-message-row--human' : 'aj-message-row--ai',
+        (queued || cancelled) && 'aj-message-row--stacked',
         classNames?.root,
       )}
     >
@@ -121,6 +143,8 @@ export function Message({
         className={cn(
           'aj-message-bubble',
           isHuman ? 'aj-message-bubble--human' : 'aj-message-bubble--ai',
+          queued && 'aj-message-bubble--queued',
+          cancelled && 'aj-message-bubble--cancelled',
           isHuman ? classNames?.humanBubble : classNames?.aiBubble,
         )}
       >
@@ -141,6 +165,23 @@ export function Message({
           <Markdown>{message.content}</Markdown>
         )}
       </div>
+      {queued ? (
+        <span
+          className={cn('aj-message-marker', 'aj-message-marker--queued', classNames?.queuedMarker)}
+          title="Waiting for the current response to finish"
+        >
+          <Clock aria-hidden />
+          Queued
+        </span>
+      ) : null}
+      {cancelled ? (
+        <span
+          className={cn('aj-message-marker', 'aj-message-marker--cancelled', classNames?.cancelledMarker)}
+        >
+          <Ban aria-hidden />
+          Stopped
+        </span>
+      ) : null}
     </div>
   );
 }

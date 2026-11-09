@@ -629,6 +629,33 @@
   border-radius: calc(var(--aj-radius) - 0.25rem);
 }
 
+/* Queued (user bubble, 0.7) / stopped (assistant bubble, 0.7) markers. The
+ * row stacks the bubble and a small caption so the caption hugs the bubble's
+ * edge on either side. */
+.aj-message-row--stacked {
+  flex-direction: column;
+  gap: 0.25rem;
+}
+.aj-message-row--stacked.aj-message-row--human { align-items: flex-end; }
+.aj-message-row--stacked.aj-message-row--ai    { align-items: flex-start; }
+.aj-message-bubble--queued {
+  opacity: 0.7;
+}
+.aj-message-bubble--cancelled {
+  border: 1px dashed color-mix(in oklab, var(--aj-muted-foreground) 50%, transparent);
+  background-color: color-mix(in oklab, var(--aj-secondary) 60%, transparent);
+}
+.aj-message-marker {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 0.6875rem;
+  line-height: 1;
+  color: var(--aj-muted-foreground);
+  padding: 0 0.25rem;
+}
+.aj-message-marker svg { width: 0.75rem; height: 0.75rem; }
+
 .aj-message-bubble--human .aj-prose {
   /* Mirror primary-foreground onto code/blockquote borders inside human bubbles. */
   color: var(--aj-primary-foreground);
@@ -699,6 +726,113 @@
   max-height: 16rem;
   overflow: auto;
 }
+
+/* Sub-agent card (0.7): send_context_message with await_response=true */
+.aj-subagent {
+  display: flex;
+  flex-direction: column;
+  align-self: flex-start;
+  gap: 0.35rem;
+  max-width: var(--aj-bubble-max-width);
+  font-size: 0.75rem;
+  color: var(--aj-muted-foreground);
+  border: 1px solid var(--aj-border);
+  border-radius: calc(var(--aj-radius) - 0.25rem);
+  padding: 0.5rem 0.625rem;
+  background-color: color-mix(in oklab, var(--aj-muted) 40%, transparent);
+}
+.aj-subagent--awaiting {
+  border-color: color-mix(in oklab, var(--aj-primary) 35%, var(--aj-border));
+}
+.aj-subagent--error {
+  border-color: color-mix(in oklab, var(--aj-destructive) 45%, transparent);
+}
+.aj-subagent--cancelled { border-style: dashed; }
+.aj-subagent-header {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.75rem;
+  color: var(--aj-muted-foreground);
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  text-align: left;
+}
+.aj-subagent-header:disabled { cursor: default; }
+.aj-subagent-header svg {
+  width: 0.875rem;
+  height: 0.875rem;
+  flex-shrink: 0;
+}
+.aj-subagent-spin { width: 0.75rem; height: 0.75rem; }
+.aj-subagent-title { font-weight: 500; }
+.aj-subagent-id {
+  font-family: var(--aj-font-mono);
+  font-size: 0.6875rem;
+  opacity: 0.7;
+}
+.aj-subagent-activity {
+  padding-left: 1.3rem;
+  font-size: 0.75rem;
+}
+.aj-subagent-details {
+  margin: 0.15rem 0 0.1rem 1.3rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  align-self: stretch;
+}
+.aj-subagent-tools {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+.aj-subagent-tool {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+.aj-subagent-tool svg { width: 0.75rem; height: 0.75rem; }
+.aj-subagent-error {
+  color: var(--aj-destructive);
+  padding-left: 1.3rem;
+}
+.aj-subagent-reply {
+  margin-top: 0.15rem;
+  font-size: 0.875rem;
+  line-height: 1.5;
+  color: var(--aj-secondary-foreground);
+  background-color: var(--aj-secondary);
+  border-radius: calc(var(--aj-radius) - 0.375rem);
+  padding: 0.5rem 0.625rem;
+  word-wrap: break-word;
+  overflow-wrap: anywhere;
+}
+
+/* Sub-agent chips (0.7): create_context + non-await send_context_message */
+.aj-subagent-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  align-self: flex-start;
+  font-size: 0.75rem;
+  color: var(--aj-muted-foreground);
+  border: 1px solid var(--aj-border);
+  border-radius: 9999px;
+  padding: 0.2rem 0.625rem;
+  background-color: color-mix(in oklab, var(--aj-muted) 40%, transparent);
+}
+.aj-subagent-chip svg {
+  width: 0.75rem;
+  height: 0.75rem;
+  flex-shrink: 0;
+}
+.aj-subagent-chip--cancelled { border-style: dashed; }
 
 /* Bouncing dots indicator */
 .aj-dots {
@@ -945,6 +1079,34 @@
   pointer-events: none;
 }
 .aj-input-send svg { width: 1rem; height: 1rem; }
+/* Stop button (0.7): shown while the agent is generating. */
+.aj-input-cancel {
+  flex-shrink: 0;
+  align-self: flex-end;
+  height: 2rem;
+  width: 2rem;
+  border-radius: 9999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background-color: var(--aj-primary);
+  color: var(--aj-primary-foreground);
+  cursor: pointer;
+  transition: background-color 120ms, opacity 120ms;
+}
+.aj-input-cancel:hover:not(:disabled) {
+  background-color: color-mix(in oklab, var(--aj-primary) 85%, transparent);
+}
+.aj-input-cancel:disabled {
+  opacity: 0.5;
+  cursor: default;
+  pointer-events: none;
+}
+.aj-input-cancel svg {
+  width: 0.75rem;
+  height: 0.75rem;
+  fill: currentColor;
+}
 
 /* ============================================================
  * ChatHistory

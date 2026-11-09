@@ -1,7 +1,7 @@
 'use client';
 
 import * as React from 'react';
-import { Send } from 'lucide-react';
+import { Send, Square } from 'lucide-react';
 import { useChat } from '../hooks/useChat';
 import { cn } from '../lib/utils';
 
@@ -9,6 +9,8 @@ export interface ChatInputClassNames {
   root?: string;
   textarea?: string;
   sendButton?: string;
+  /** The stop/cancel button shown in place of send while the agent generates. */
+  cancelButton?: string;
 }
 
 export interface ChatInputProps {
@@ -30,6 +32,14 @@ export interface ChatInputProps {
   maxHeightPx?: number;
   /** Override of the send action. */
   onSend?: (text: string) => void;
+  /**
+   * Show a stop button (calls `stop_invocation`) while
+   * `status === 'streaming'`. It replaces the send button when the composer
+   * is empty and sits next to it otherwise. Defaults to true.
+   */
+  showCancelButton?: boolean;
+  /** Override of the cancel action (defaults to `useChat().cancel`). */
+  onCancel?: () => void;
 }
 
 /**
@@ -45,8 +55,10 @@ export function ChatInput({
   disableWhileStreaming = true,
   maxHeightPx = 200,
   onSend,
+  showCancelButton = true,
+  onCancel,
 }: ChatInputProps): JSX.Element {
-  const { send, status, hasContext } = useChat();
+  const { send, cancel, status, hasContext, canCancel, isCancelling } = useChat();
   const [value, setValue] = React.useState('');
   const textareaRef = React.useRef<HTMLTextAreaElement | null>(null);
 
@@ -56,6 +68,17 @@ export function ChatInput({
   // are the no-backend-yet placeholder users see before sending their first
   // message; the send action itself triggers create_context + connect.
   const sendBlocked = (disableWhileStreaming && streaming) || connecting;
+  const showCancel = showCancelButton && canCancel;
+
+  const doCancel = React.useCallback(() => {
+    if (onCancel) {
+      onCancel();
+      return;
+    }
+    cancel().catch(() => {
+      // Errors surface via the store + onError config.
+    });
+  }, [cancel, onCancel]);
 
   const resize = React.useCallback(() => {
     const el = textareaRef.current;
@@ -118,16 +141,30 @@ export function ChatInput({
         className={cn('aj-input-textarea', classNames?.textarea)}
         style={{ maxHeight: maxHeightPx }}
       />
-      <button
-        type="button"
-        aria-label="Send"
-        title="Send"
-        onClick={() => void submit()}
-        disabled={sendBlocked || value.trim().length === 0}
-        className={cn('aj-input-send', classNames?.sendButton)}
-      >
-        <Send aria-hidden />
-      </button>
+      {showCancel ? (
+        <button
+          type="button"
+          aria-label="Stop generating"
+          title="Stop generating"
+          onClick={doCancel}
+          disabled={isCancelling}
+          className={cn('aj-input-cancel', classNames?.cancelButton)}
+        >
+          <Square aria-hidden />
+        </button>
+      ) : null}
+      {!showCancel || value.trim().length > 0 ? (
+        <button
+          type="button"
+          aria-label="Send"
+          title="Send"
+          onClick={() => void submit()}
+          disabled={sendBlocked || value.trim().length === 0}
+          className={cn('aj-input-send', classNames?.sendButton)}
+        >
+          <Send aria-hidden />
+        </button>
+      ) : null}
     </div>
   );
 }

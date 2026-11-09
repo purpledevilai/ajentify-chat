@@ -5,6 +5,11 @@ import { Loader2, Sparkles } from 'lucide-react';
 import { useChat } from '../hooks/useChat';
 import { uid } from '../lib/utils';
 import { cn } from '../lib/utils';
+import {
+  deriveSubagentCard,
+  isSubagentToolCall,
+  linkedSubagentReplyIds,
+} from '../lib/subagents';
 import { Message, type MessageClassNames } from './Message';
 
 export interface ChatMessagesClassNames {
@@ -86,14 +91,33 @@ export function ChatMessages({
   suggestedPrompts,
   hideToolRunningIndicator,
 }: ChatMessagesProps): JSX.Element {
-  const { messages, pendingResponse, status, isWaitingForResponse, send } = useChat();
+  const { messages, pendingResponse, status, isWaitingForResponse, send, subagentRuns } =
+    useChat();
   const containerRef = React.useRef<HTMLDivElement | null>(null);
   const stickToBottomRef = React.useRef(true);
 
+  // Sub-agent cards: `send_context_message` / `create_context` tool calls
+  // render as cards; the synthetic `send_context_message_response` call that
+  // answers an awaited send is folded onto its card and hidden here.
+  const hiddenReplyIds = React.useMemo(() => linkedSubagentReplyIds(messages), [messages]);
+  const subagentCards = React.useMemo(() => {
+    const out = new Map<string, ReturnType<typeof deriveSubagentCard>>();
+    for (const m of messages) {
+      if (isSubagentToolCall(m)) {
+        out.set(m.toolCallId, deriveSubagentCard(m, messages, subagentRuns));
+      }
+    }
+    return out;
+  }, [messages, subagentRuns]);
+
   const renderItems = React.useMemo(() => {
-    if (!pendingResponse) return messages;
+    const visible =
+      hiddenReplyIds.size === 0
+        ? messages
+        : messages.filter((m) => !(m.kind === 'tool_call' && hiddenReplyIds.has(m.toolCallId)));
+    if (!pendingResponse) return visible;
     return [
-      ...messages,
+      ...visible,
       {
         kind: 'text' as const,
         localId: `pending-${pendingResponse.responseId}`,
@@ -104,7 +128,7 @@ export function ChatMessages({
         createdAt: Date.now(),
       },
     ];
-  }, [messages, pendingResponse]);
+  }, [messages, pendingResponse, hiddenReplyIds]);
 
   const showWaiting = isWaitingForResponse && waitingIndicator !== null;
 
@@ -180,6 +204,8 @@ export function ChatMessages({
               !hideToolRunningIndicator &&
               m.kind === 'tool_call' &&
               m.toolOutput == null;
+            const subagentCard =
+              m.kind === 'tool_call' ? subagentCards.get(m.toolCallId) ?? null : null;
             return (
               <Message
                 key={m.kind === 'text' ? m.localId : m.localId ?? uid('msg')}
@@ -187,6 +213,7 @@ export function ChatMessages({
                 streaming={Boolean('pending' in m && m.pending)}
                 animate={!noAnimation}
                 toolRunning={toolRunning}
+                subagentCard={subagentCard}
                 classNames={classNames?.message}
               />
             );

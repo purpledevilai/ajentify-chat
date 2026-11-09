@@ -22,6 +22,11 @@ export {
   type ChatHistoryClassNames,
 } from './components/ChatHistory';
 export { Message, type MessageProps, type MessageClassNames } from './components/Message';
+export {
+  SubagentCard,
+  type SubagentCardProps,
+  type SubagentCardClassNames,
+} from './components/SubagentCard';
 export { TypingText, type TypingTextProps } from './components/TypingText';
 export {
   ChatToggleButton,

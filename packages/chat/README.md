@@ -2,6 +2,8 @@
 
 A React npm package that gives developers a fully headless logic layer (Zustand stores + hooks) and an optional UI (plain-CSS components built on Radix) for connecting to the [Ajentify](https://api.ajentify.com) token streaming server.
 
+> **v0.7 adds queued messages, sub-agent cards and a stop button** on top of the connect server's context-runner protocol (`on_queued`, `on_cancelled`, `on_subagent_event`, `on_subagent_complete`). Additive — older servers never send the frames. See [Queued messages, sub-agents, cancel](#queued-messages-sub-agents-cancel) and [CHANGELOG.md](./CHANGELOG.md).
+
 > **v0.6 requires an Ajentify connect server at or after the mainline-beta release.** The streaming protocol that was opt-in (`beta: true`) in 0.4/0.5 is now the only protocol: `add_message` is fire-and-forget, assistant text arrives in segments (`on_message_start` … `on_stop_token`) and the turn ends with `on_turn_complete`. The `beta` config option is deprecated and ignored. See [CHANGELOG.md](./CHANGELOG.md).
 
 > **v0.2 is a major release.** It's frictionless out of the box: no Tailwind / typography-plugin requirement on the host, auto-injected styles, full-color theme tokens, and built-in helpers for the event client, server router, panel state, and typed client-side tools. See [CHANGELOG.md](./CHANGELOG.md) for the migration steps.
@@ -170,6 +172,52 @@ When `<ChatView />` (or `<ChatPanel />`) mounts on a fresh session, it auto-call
 - `agentSpeaksFirst: true` — eagerly calls `create_context` and opens the WebSocket so the agent can stream its greeting before the user types.
 
 If the eager call fails, the chat falls back to a "Couldn't start a new chat — Try again" affordance and does not auto-retry. Customise it with the `emptyState` prop.
+
+## Queued messages, sub-agents, cancel
+
+Since 0.7 the connect server runs each context through a single runner with an inbox, so messages can arrive while a turn is generating and agents can spawn and message sub-agents. The package reflects all of it out of the box.
+
+### New frames
+
+| Frame | Store effect | Default UI |
+|---|---|---|
+| `on_queued { item_id }` | Flags the latest human message (`queued`, `queuedItemId`); stays `'streaming'` through the current turn; cleared on the next `on_message_start` | "Queued" caption under the bubble |
+| `on_cancelled { response_id }` | Terminal frame after `stop_invocation`. Marks the partial assistant bubble `cancelled`, fills dangling tool calls with `"cancelled by user"`, `status → 'connected'` | "Stopped" caption, dashed bubble |
+| `on_subagent_event { parent_tool_call_id, child_context_id, event }` | Upserts `subagentRuns[parent_tool_call_id]` (child context, latest event, child tool calls + state) | Child's current tool name on the card |
+| `on_subagent_complete { parent_tool_call_id, child_context_id, status }` | Sets the run's terminal status (`complete` / `error` / `cancelled`) | Card leaves the processing state |
+
+### Sub-agent cards
+
+Agents use two tools: `create_context` → `{"context_id": …}` and `send_context_message(context_id, message, await_response)`. When `await_response` is true the tool's immediate output is only an acknowledgement; the child's real reply lands later as a separate `send_context_message_response` tool call whose `tool_input.original_tool_call_id` points back at the send. `deriveSubagentCard` folds those pieces into one model:
+
+```ts
+import { deriveSubagentCard, useChat } from '@ajentify/chat';
+
+const { messages, subagentRuns } = useChat();
+const card = deriveSubagentCard(sendToolCallMessage, messages, subagentRuns);
+// card.kind:   'awaiting' | 'sent' | 'created'
+// card.status: 'awaiting' | 'complete' | 'error' | 'cancelled'
+// card.replyText, card.currentToolName, card.run, card.contextId …
+```
+
+- **awaiting** (`await_response: true`) — processing indicator from the ack until the `_response` pair appears (even in a later turn) or `on_subagent_complete` arrives; then shows the reply text.
+- **sent** (`await_response: false`) — a small "Sent to sub-agent" chip.
+- **created** (`create_context`) — a small "Created sub-agent context" chip.
+
+The derivation is pure and gives the same result for live streams and `GET /context?with_tool_calls` hydration. `<ChatMessages />` does this automatically and hides the linked `_response` row; headless UIs can pass the model to `<Message subagentCard={card} />` or render `<SubagentCard card={card} />` from `@ajentify/chat/ui`.
+
+### Cancel
+
+```tsx
+const { cancel, canCancel, isCancelling } = useChat();
+<button disabled={!canCancel || isCancelling} onClick={() => void cancel()}>Stop</button>
+```
+
+`cancel()` sends `stop_invocation` and resolves with `{ success, cancelled }`; the turn ends with `on_cancelled`. Only this context's turn stops — awaited sub-agents keep running and their replies still land. `<ChatInput />` shows a stop button while `status === 'streaming'` (`showCancelButton={false}` to hide, `onCancel` to override).
+
+### Sending while the agent is busy
+
+`sendMessage()` mid-turn keeps the in-flight partial; the server queues the message and answers `on_queued`. `<ChatInput disableWhileStreaming={false} />` lets users queue follow-ups.
 
 ## Theming
 
