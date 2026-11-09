@@ -47,13 +47,15 @@ interface Setup {
 function setupStores(opts: {
   agentSpeaksFirst?: boolean;
   proxy?: ReturnType<typeof makeProxy>;
+  /** Deprecated no-op; only passed to prove it is ignored. */
   beta?: boolean;
   onError?: (err: unknown) => void;
+  clientSideTools?: ReturnType<typeof createClientSideToolsStore>;
 } = {}): Setup {
   const proxy = opts.proxy ?? makeProxy();
   const server = createMockServer();
   const contexts = createContextsStore({ onProxy: proxy, storage: null });
-  const clientSideTools = createClientSideToolsStore();
+  const clientSideTools = opts.clientSideTools ?? createClientSideToolsStore();
   const current = createCurrentContextStore({
     contextsStore: contexts,
     clientSideToolsStore: clientSideTools,
@@ -68,8 +70,8 @@ function setupStores(opts: {
 
 /**
  * Wire a happy-path mock server that auto-replies to `connect_to_context`
- * (and optionally `add_message`) with successful results. Returns the
- * sent-frames buffer for assertions.
+ * with a successful result. `add_message` / `client_side_tool_responses`
+ * are fire-and-forget (no id) so the server never replies to them.
  */
 function autoRespond(server: ReturnType<typeof createMockServer>) {
   const orig = server.onSend;
@@ -84,10 +86,19 @@ function autoRespond(server: ReturnType<typeof createMockServer>) {
           agent: { agent_id: 'a1', agent_name: 'Bot' },
         },
       });
-    } else if (msg.method === 'add_message' && msg.id) {
-      server.push({ id: msg.id, result: { success: true } });
     }
   };
+}
+
+function parseFrames(server: ReturnType<typeof createMockServer>) {
+  return server.sent.map(
+    (raw) =>
+      JSON.parse(raw) as {
+        method: string;
+        id?: string;
+        params: Record<string, unknown>;
+      }
+  );
 }
 
 describe('currentContextStore', () => {
@@ -273,10 +284,10 @@ describe('currentContextStore', () => {
     });
   });
 
-  describe('beta streaming protocol', () => {
-    /** Materialize a connected beta context with one human message sent. */
-    async function connectBeta() {
-      const setup = setupStores({ beta: true });
+  describe('streaming protocol (always on)', () => {
+    /** Materialize a connected context with one human message sent. */
+    async function connectAndSend(opts: Parameters<typeof setupStores>[0] = {}) {
+      const setup = setupStores(opts);
       autoRespond(setup.server);
       await setup.current.getState().startNewContext();
       await setup.current.getState().sendMessage('hi');
@@ -284,28 +295,150 @@ describe('currentContextStore', () => {
     }
 
     it('sends connect_to_context with beta:true and add_message fire-and-forget (no id)', async () => {
-      const { current, server } = await connectBeta();
+      const { current, server } = await connectAndSend();
 
-      const frames = server.sent.map(
-        (raw) => JSON.parse(raw) as { method: string; id?: string }
-      );
+      const frames = parseFrames(server);
       const connectFrame = frames.find((f) => f.method === 'connect_to_context');
       expect(connectFrame).toBeDefined();
-      const connectParams = JSON.parse(
-        server.sent.find((raw) => raw.includes('connect_to_context'))!
-      ) as { params: { beta?: boolean } };
-      expect(connectParams.params.beta).toBe(true);
+      expect(connectFrame?.params.beta).toBe(true);
 
       const addFrame = frames.find((f) => f.method === 'add_message');
       expect(addFrame).toBeDefined();
-      // Fire-and-forget => no RPC id, so the 30s timer never applies.
+      // Fire-and-forget => no RPC id, so the request timer never applies.
       expect(addFrame?.id).toBeUndefined();
+      // sendMessage resolved without any server reply and we are waiting.
+      expect(current.getState().status).toBe('streaming');
+
+      current.getState().disconnect();
+    });
+
+    it('ignores the deprecated beta option (beta:false still uses the protocol)', async () => {
+      const { current, server } = await connectAndSend({ beta: false });
+
+      const frames = parseFrames(server);
+      expect(frames.find((f) => f.method === 'connect_to_context')?.params.beta).toBe(true);
+      expect(frames.find((f) => f.method === 'add_message')?.id).toBeUndefined();
+
+      // A lone on_stop_token does not end the turn.
+      server.push({ method: 'on_message_start', params: { response_id: 'r1' } });
+      server.push({ method: 'on_token', params: { token: 'hey', response_id: 'r1' } });
+      server.push({ method: 'on_stop_token', params: { response_id: 'r1' } });
+      expect(current.getState().status).toBe('streaming');
+      server.push({ method: 'on_turn_complete', params: {} });
+      expect(current.getState().status).toBe('connected');
+
+      current.getState().disconnect();
+    });
+
+    it('does not time out a long turn (no reply for longer than requestTimeoutMs)', async () => {
+      vi.useFakeTimers();
+      try {
+        const onError = vi.fn();
+        const { current, server } = await connectAndSend({ onError });
+
+        // Well past the default 30s request timeout with no server reply.
+        await vi.advanceTimersByTimeAsync(60_000);
+
+        expect(onError).not.toHaveBeenCalled();
+        expect(current.getState().status).toBe('streaming');
+        expect(current.getState().error).toBeNull();
+
+        server.push({ method: 'on_message_start', params: { response_id: 'r1' } });
+        server.push({ method: 'on_token', params: { token: 'late', response_id: 'r1' } });
+        server.push({ method: 'on_stop_token', params: { response_id: 'r1' } });
+        server.push({ method: 'on_turn_complete', params: {} });
+
+        expect(current.getState().status).toBe('connected');
+        expect(
+          current.getState().messages.filter((m) => m.kind === 'text' && m.sender === 'ai')
+        ).toHaveLength(1);
+
+        current.getState().disconnect();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('keeps streaming across a tool round and only finishes on on_turn_complete', async () => {
+      const { current, server } = await connectAndSend();
+
+      server.push({ method: 'on_message_start', params: { response_id: 'r1' } });
+      server.push({ method: 'on_token', params: { token: 'Checking…', response_id: 'r1' } });
+      server.push({ method: 'on_stop_token', params: { response_id: 'r1' } });
+      server.push({
+        method: 'on_tool_call',
+        params: { tool_call_id: 'tc1', tool_name: 'search', tool_input: {} },
+      });
+      expect(current.getState().status).toBe('streaming');
+      server.push({
+        method: 'on_tool_response',
+        params: { tool_call_id: 'tc1', tool_name: 'search', tool_output: 'ok' },
+      });
+      expect(current.getState().status).toBe('streaming');
+
+      server.push({ method: 'on_message_start', params: { response_id: 'r2' } });
+      server.push({ method: 'on_token', params: { token: 'Done.', response_id: 'r2' } });
+      server.push({ method: 'on_stop_token', params: { response_id: 'r2' } });
+      expect(current.getState().status).toBe('streaming');
+
+      server.push({ method: 'on_turn_complete', params: { response_id: 'r2' } });
+      expect(current.getState().status).toBe('connected');
+      expect(current.getState().messages.map((m) => m.kind)).toEqual([
+        'text',
+        'text',
+        'tool_call',
+        'text',
+      ]);
+
+      current.getState().disconnect();
+    });
+
+    it('sends client_side_tool_responses fire-and-forget and lets the continuation drive status', async () => {
+      const clientSideTools = createClientSideToolsStore();
+      clientSideTools.getState().setClientSideToolHandler(async () => 'tool-result');
+      const { current, server } = await connectAndSend({ clientSideTools });
+
+      server.push({
+        method: 'on_client_side_tool_calls',
+        params: {
+          response_id: 'r1',
+          tool_calls: [{ tool_call_id: 'ct1', tool_name: 'lookup', tool_input: { q: 1 } }],
+        },
+      });
+      expect(current.getState().status).toBe('awaiting_tool_responses');
+
+      // Let the async handler + send settle.
+      await vi.waitFor(() => {
+        expect(
+          parseFrames(server).find((f) => f.method === 'client_side_tool_responses')
+        ).toBeDefined();
+      });
+      const respFrame = parseFrames(server).find(
+        (f) => f.method === 'client_side_tool_responses'
+      );
+      expect(respFrame?.id).toBeUndefined();
+      expect(respFrame?.params.tool_responses).toEqual([
+        { tool_call_id: 'ct1', response: 'tool-result' },
+      ]);
+      const toolMsg = current
+        .getState()
+        .messages.find((m) => m.kind === 'tool_call' && m.toolCallId === 'ct1');
+      expect((toolMsg as { toolOutput?: string }).toolOutput).toBe('tool-result');
+      // No reply from the server, status is untouched until the continuation.
+      expect(current.getState().status).toBe('awaiting_tool_responses');
+
+      server.push({ method: 'on_message_start', params: { response_id: 'r2' } });
+      server.push({ method: 'on_token', params: { token: 'Found it.', response_id: 'r2' } });
+      expect(current.getState().status).toBe('streaming');
+      server.push({ method: 'on_stop_token', params: { response_id: 'r2' } });
+      server.push({ method: 'on_turn_complete', params: {} });
+      expect(current.getState().status).toBe('connected');
 
       current.getState().disconnect();
     });
 
     it('splits preamble and final text into two bubbles across segments', async () => {
-      const { current, server } = await connectBeta();
+      const { current, server } = await connectAndSend();
 
       // Segment 1: preamble
       server.push({ method: 'on_message_start', params: { response_id: 'r1' } });
@@ -337,7 +470,7 @@ describe('currentContextStore', () => {
     });
 
     it('merges on_tool_response onto the matching tool_call (no standalone response message)', async () => {
-      const { current, server } = await connectBeta();
+      const { current, server } = await connectAndSend();
 
       server.push({
         method: 'on_tool_call',
@@ -370,11 +503,7 @@ describe('currentContextStore', () => {
 
     it('on_error sets status to error and surfaces the message', async () => {
       const onError = vi.fn();
-      const { current, server } = setupStores({ beta: true, onError });
-      autoRespond(server);
-
-      await current.getState().startNewContext();
-      await current.getState().sendMessage('hi');
+      const { current, server } = await connectAndSend({ onError });
 
       server.push({ method: 'on_error', params: { message: 'boom' } });
 

@@ -32,10 +32,8 @@ export interface CurrentContextStoreOptions {
   /** Forwarded to TokenStreamingClient. */
   requestTimeoutMs?: TokenStreamingClientOptions['requestTimeoutMs'];
   /**
-   * Opt into the beta streaming protocol. When true the store adjusts its
-   * status machine (a per-segment `on_stop_token` keeps `status: 'streaming'`;
-   * `on_turn_complete` ends the turn) and registers `on_message_start` /
-   * `on_turn_complete` / `on_error` handlers.
+   * @deprecated Since 0.6.0 the (formerly beta) streaming protocol is the only
+   * protocol; this option is accepted and ignored.
    */
   beta?: boolean;
   /** Optional callback for server-side agent events. */
@@ -314,7 +312,6 @@ export function createCurrentContextStore(options: CurrentContextStoreOptions) {
         WebSocketImpl: options.WebSocketImpl,
         reconnect: options.reconnect,
         requestTimeoutMs: options.requestTimeoutMs,
-        beta: options.beta,
       });
 
       wsClient = client;
@@ -366,9 +363,9 @@ export function createCurrentContextStore(options: CurrentContextStoreOptions) {
         set({ agent, agentSpeaksFirst: Boolean(agent_speaks_first) });
       });
 
-      // Beta only: a new assistant text segment is starting. Reset the pending
-      // buffer to the fresh response_id so preamble and final text commit as
-      // separate bubbles (the intervening on_stop_token flushes the preamble).
+      // A new assistant text segment is starting. Reset the pending buffer to
+      // the fresh response_id so preamble and final text commit as separate
+      // bubbles (the intervening on_stop_token flushes the preamble).
       client.on('on_message_start', ({ response_id }) => {
         if (isStale()) return;
         set({
@@ -398,10 +395,10 @@ export function createCurrentContextStore(options: CurrentContextStoreOptions) {
 
       client.on('on_stop_token', ({ response_id }) => {
         if (isStale()) return;
-        // In beta the turn continues after a segment ends (more segments / tool
-        // rounds may follow), so keep 'streaming' until on_turn_complete. In
-        // classic mode a single on_stop_token ends the turn -> 'connected'.
-        const nextStatus = options.beta ? 'streaming' : 'connected';
+        // on_stop_token only ends a *segment*; the turn continues (more
+        // segments / tool rounds may follow), so stay 'streaming' until
+        // on_turn_complete.
+        const nextStatus = 'streaming';
         const pending = get().pendingResponse;
         if (pending && pending.responseId === response_id && pending.text) {
           const aiMessage: TextMessage = {
@@ -422,14 +419,14 @@ export function createCurrentContextStore(options: CurrentContextStoreOptions) {
         }
       });
 
-      // Beta only: the whole turn (all segments + tools + recursion) finished.
+      // The whole turn (all segments + tools + recursion) finished.
       client.on('on_turn_complete', () => {
         if (isStale()) return;
         set({ pendingResponse: null, status: 'connected' });
       });
 
-      // Beta only: server-side turn failure (surfaced explicitly because
-      // add_message is fire-and-forget and no RPC error reply is sent).
+      // Server-side turn failure (surfaced explicitly because add_message is
+      // fire-and-forget and no RPC error reply is sent).
       client.on('on_error', ({ message }) => {
         if (isStale()) return;
         const e = new AjentifyError(message, 'rpc');
@@ -506,14 +503,9 @@ export function createCurrentContextStore(options: CurrentContextStoreOptions) {
                 : m
             ),
           });
-          // The server replies to `client_side_tool_responses` only AFTER it
-          // has already emitted on_token / on_stop_token (and possibly the
-          // next round's on_client_side_tool_calls) for the continuation. By
-          // the time this await resolves, those notifications have already
-          // driven `status` to its correct value (`connected`, `streaming`,
-          // or `awaiting_tool_responses` for the next round). Re-setting it
-          // here would clobber that and leave the input permanently
-          // disabled when the agent does not produce any further text.
+          // Fire-and-forget: don't touch `status` here. The continuation's
+          // on_message_start / on_token / on_stop_token / on_turn_complete
+          // (or the next round's on_client_side_tool_calls) drive it.
           await client.sendClientSideToolResponses(responses);
         } catch (err) {
           const e =

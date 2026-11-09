@@ -1,5 +1,51 @@
 # Changelog
 
+## 0.6.0 — Beta streaming protocol is now the only protocol
+
+The streaming protocol introduced as opt-in `beta: true` in 0.4.0 is now the
+**only** protocol. The legacy (await-the-RPC-reply, single `on_stop_token` ends
+the turn) code paths have been removed from the client and the store.
+
+> **Requires an Ajentify connect server at or after the mainline-beta
+> release.** The server is dropping its legacy `/ws` handling in the same
+> change; 0.6.0 always speaks the (formerly beta) protocol.
+
+### What changed
+
+- **`connect_to_context` always sends `beta: true`.** Ignored by servers that
+  have mainlined the protocol; harmless either way.
+- **`add_message` / `client_side_tool_responses` are always fire-and-forget**
+  (no RPC id). The `requestTimeoutMs` timer now only applies to
+  `connect_to_context`, so a long agent turn can never trip
+  `RPC 'add_message' timed out`.
+- **Store state machine is always the segment-aware one.** `on_message_start`
+  opens a fresh assistant bubble, `on_stop_token` closes a *segment* but keeps
+  `status: 'streaming'`, `on_turn_complete` ends the turn (`status:
+  'connected'`), `on_error` surfaces server-side turn failures.
+- **`TokenStreamingEvents`** docs updated: `on_message_start`,
+  `on_turn_complete`, `on_error` are no longer marked "beta only".
+
+### Deprecated (accepted and ignored)
+
+- `beta?: boolean` on `AjentifyConfig`, `CreateStoresOptions`,
+  `CurrentContextStoreOptions` and `TokenStreamingClientOptions`. Existing
+  callers still compile; the value has no effect. It will be removed in a
+  future major.
+
+### Migration checklist
+
+1. Make sure your connect server is on the mainline-beta release (or later).
+2. Bump `@ajentify/chat` to `^0.6.0`.
+3. Delete `beta: true` from your `<AjentifyProvider>` config (optional — it's a
+   no-op now).
+4. If you used the standalone `TokenStreamingClient` and treated a single
+   `on_stop_token` as "turn done", switch to `on_turn_complete`.
+
+## 0.5.0 — Default WebSocket URL → connect server
+
+- Default `websocketUrl` is now `wss://connect.ajentify.com/ws` (the Ajentify
+  connect server). Override on the provider if you self-host.
+
 ## 0.4.0 — Beta streaming protocol + richer tool-call UI
 
 Opt-in **beta streaming protocol** plus a reworked tool-call presentation. All

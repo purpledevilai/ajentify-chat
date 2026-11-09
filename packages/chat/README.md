@@ -2,6 +2,8 @@
 
 A React npm package that gives developers a fully headless logic layer (Zustand stores + hooks) and an optional UI (plain-CSS components built on Radix) for connecting to the [Ajentify](https://api.ajentify.com) token streaming server.
 
+> **v0.6 requires an Ajentify connect server at or after the mainline-beta release.** The streaming protocol that was opt-in (`beta: true`) in 0.4/0.5 is now the only protocol: `add_message` is fire-and-forget, assistant text arrives in segments (`on_message_start` … `on_stop_token`) and the turn ends with `on_turn_complete`. The `beta` config option is deprecated and ignored. See [CHANGELOG.md](./CHANGELOG.md).
+
 > **v0.2 is a major release.** It's frictionless out of the box: no Tailwind / typography-plugin requirement on the host, auto-injected styles, full-color theme tokens, and built-in helpers for the event client, server router, panel state, and typed client-side tools. See [CHANGELOG.md](./CHANGELOG.md) for the migration steps.
 
 ## Install
