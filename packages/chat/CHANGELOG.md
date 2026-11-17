@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.8.0 — `applyEdits`
+
+Additive. Ships the platform-wide anchored **`edits`** contract so a client-side
+tool can apply agent-authored edits to text the page owns.
+
+- **`applyEdits(text, edits)`** → `{ text, summary }`; ordered, all-or-nothing
+  `replace` / `insert_before` / `insert_after` / `delete` operations whose
+  `target` / `anchor` must occur exactly once. Throws **`TextEditError`**
+  (`code`: `empty_edits` | `invalid_edit` | `target_not_found` |
+  `ambiguous_target`; `details`: `edit_index`, `match_count`, `contexts`).
+- **`EDITS_SCHEMA`** (canonical JSON Schema of an `edits` parameter),
+  `EDITS_FIELD_DESCRIPTION`, `EDIT_OPERATIONS`, `validateEdit`; types
+  `EditOperation`, `EditSummary`.
+- The implementation (`src/lib/textEdits.ts`) is byte-identical with
+  `@ajentify/sdk` and `@ajentify/voice`, mirroring the API's `Lib/TextEdits.py`.
+
 ## 0.7.0 — Queued messages, sub-agent cards, cancel
 
 UI + store support for the connect server's context-runner protocol
