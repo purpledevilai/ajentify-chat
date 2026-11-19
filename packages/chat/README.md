@@ -108,6 +108,35 @@ const clientSideTools = defineClientSideTools<Tools>({
 
 Missing handlers throw a descriptive `AjentifyError` and warn in dev.
 
+### Editing text with `applyEdits`
+
+Agents edit text with the platform-wide **`edits`** contract — an ordered, all-or-nothing list of anchored operations (`replace` / `insert_before` / `insert_after` / `delete`) whose `target` / `anchor` must occur exactly once. The package ships the same algorithm the API uses server-side, so a client-side tool can take an `edits` parameter (declare it with `EDITS_SCHEMA` in the dashboard tool editor, or pick the "edits" type) and apply it to text the page owns:
+
+```ts
+import { defineClientSideTools, applyEdits, TextEditError, type EditOperation } from '@ajentify/chat';
+
+type Tools = {
+  edit_page_text: { args: { edits: EditOperation[] }; result: string };
+};
+
+const clientSideTools = defineClientSideTools<Tools>({
+  edit_page_text: ({ edits }) => {
+    try {
+      const { text, summary } = applyEdits(editor.getText(), edits);
+      editor.setText(text);
+      return `Applied edits: ${JSON.stringify(summary)}`;
+    } catch (err) {
+      // target_not_found / ambiguous_target / invalid_edit / empty_edits — return the message
+      // so the agent can retry with a more specific target instead of failing the turn.
+      if (err instanceof TextEditError) return `Edit failed (${err.code}): ${err.message}`;
+      throw err;
+    }
+  },
+});
+```
+
+`applyEdits(text, edits)` returns `{ text, summary }` (`summary` = `{ replaced, inserted_before, inserted_after, deleted }`) and never mutates its input; `TextEditError.details` carries `edit_index`, `match_count` and up to three `contexts` around an ambiguous match.
+
 ## Page-level tools
 
 The agent can call two special tools — `get_page_data` and `do_page_action` — to read the current page and act on it. Mount these from any page:

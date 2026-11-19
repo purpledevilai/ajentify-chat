@@ -48,6 +48,23 @@ export {
   replyOriginalToolCallId,
 } from './lib/subagents';
 
+// Text edits (the platform-wide `edits` contract; byte-identical with @ajentify/sdk + @ajentify/voice)
+export {
+  applyEdits,
+  validateEdit,
+  TextEditError,
+  EDIT_OPERATIONS,
+  EDITS_SCHEMA,
+  EDITS_FIELD_DESCRIPTION,
+  EDITS_TYPE_MARKER,
+  EDIT_CONTEXT_CHARS,
+  MAX_AMBIGUOUS_CONTEXTS,
+  type EditOperation,
+  type EditOperationName,
+  type EditSummary,
+  type TextEditErrorCode,
+} from './lib/textEdits';
+
 // Utilities
 export { cn, createSafeStorage, uid } from './lib/utils';
 export { injectChatStyles } from './lib/injectStyles';
